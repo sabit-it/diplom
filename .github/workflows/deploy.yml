@@ -61,6 +61,8 @@ jobs:
           Set-Content  -Path .env.docker -Value 'DATABASE_URL=${{ secrets.DATABASE_URL }}'
           Add-Content  -Path .env.docker -Value 'SECRET_KEY=${{ secrets.SECRET_KEY }}'
           Add-Content  -Path .env.docker -Value 'CORS_ORIGINS=${{ secrets.CORS_ORIGINS }}'
+          Add-Content  -Path .env.docker -Value 'SMTP_USER=${{ secrets.SMTP_USER }}'
+          Add-Content  -Path .env.docker -Value 'SMTP_PASSWORD=${{ secrets.SMTP_PASSWORD }}'
 
       - name: Deploy
         shell: powershell
