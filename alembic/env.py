@@ -8,14 +8,14 @@ from sqlalchemy import engine_from_config, pool
 
 from alembic import context
 
-BASE_DIR = Path(__file__).resolve().parents[2]
+BASE_DIR = Path(__file__).resolve().parents[1]  # project root
 sys.path.append(str(BASE_DIR))
 
 config = context.config
 
 
 def _load_database_url() -> str:
-    env_path = BASE_DIR / "app" / ".env"
+    env_path = BASE_DIR / ".env"
     if env_path.exists():
         for line in env_path.read_text(encoding="utf-8").splitlines():
             raw = line.strip()
@@ -31,7 +31,7 @@ config.set_main_option("sqlalchemy.url", _load_database_url())
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-from app.models import Base
+from models import Base
 
 target_metadata = Base.metadata
 
