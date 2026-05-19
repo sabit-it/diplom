@@ -64,4 +64,6 @@ jobs:
 
       - name: Deploy
         shell: powershell
-        run: docker compose up -d --build --no-deps app
+        run: |
+          docker compose up -d db
+          docker compose up -d --build --no-deps app
