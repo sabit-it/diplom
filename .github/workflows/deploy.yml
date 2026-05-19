@@ -58,9 +58,9 @@ jobs:
       - name: Write .env.docker
         shell: powershell
         run: |
-          Set-Content  -Path .env.docker -Value "DATABASE_URL=${{ secrets.DATABASE_URL }}"
-          Add-Content  -Path .env.docker -Value "SECRET_KEY=${{ secrets.SECRET_KEY }}"
-          Add-Content  -Path .env.docker -Value "CORS_ORIGINS=${{ secrets.CORS_ORIGINS }}"
+          Set-Content  -Path .env.docker -Value 'DATABASE_URL=${{ secrets.DATABASE_URL }}'
+          Add-Content  -Path .env.docker -Value 'SECRET_KEY=${{ secrets.SECRET_KEY }}'
+          Add-Content  -Path .env.docker -Value 'CORS_ORIGINS=${{ secrets.CORS_ORIGINS }}'
 
       - name: Deploy
         shell: powershell
