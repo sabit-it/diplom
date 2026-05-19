@@ -7,8 +7,12 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "change-me-in-production"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
-    # В проде: CORS_ORIGINS=https://myapp.com,https://www.myapp.com
     CORS_ORIGINS: list[str] = ["*"]
+
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod

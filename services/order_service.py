@@ -30,6 +30,13 @@ from schemas.order import (
     WorkerLocationOut,
 )
 from utils.enums import OfferStatus, OrderStatus, UserRole
+from services.email_service import (
+    notify_employer_worker_accepted,
+    notify_employer_worker_declined,
+    notify_no_workers,
+    notify_order_completed,
+    notify_worker_new_offer,
+)
 
 
 def _now() -> datetime:
@@ -104,6 +111,7 @@ def create_order_with_dispatch(
     if nearest is None:
         order.status = OrderStatus.no_workers_available.value
         save_order(db, order)
+        notify_no_workers(employer.email, order.title)
         return OrderCreateResult(
             order=_order_summary(order),
             active_offer_id=None,
@@ -117,6 +125,7 @@ def create_order_with_dispatch(
         worker_id=user_w.id,
         distance_meters=int(round(dist_m)),
     )
+    notify_worker_new_offer(user_w.email, user_w.formatted_fio, order.title, order.address)
     return OrderCreateResult(
         order=_order_summary(order),
         active_offer_id=offer.id,
@@ -145,6 +154,7 @@ def _dispatch_next_after_decline(db: Session, order: Order) -> uuid.UUID | None:
         worker_id=user_w.id,
         distance_meters=int(round(dist_m)),
     )
+    notify_worker_new_offer(user_w.email, user_w.formatted_fio, order.title, order.address)
     return offer.id
 
 
@@ -181,6 +191,8 @@ def respond_to_offer(
             detail="This offer is no longer active",
         )
 
+    employer = db.get(User, order.employer_id)
+
     if accept:
         offer.status = OfferStatus.accepted.value
         offer.responded_at = _now()
@@ -200,6 +212,8 @@ def respond_to_offer(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Worker profile missing",
             )
+        if employer:
+            notify_employer_worker_accepted(employer.email, order.title, worker.formatted_fio)
         return OrderAcceptedNotification(
             order=_order_summary(order),
             worker=_assigned_worker_payload(worker, wp),
@@ -213,6 +227,8 @@ def respond_to_offer(
 
     next_id = _dispatch_next_after_decline(db, order)
     db.refresh(order)
+    if employer:
+        notify_employer_worker_declined(employer.email, order.title, next_found=next_id is not None)
     msg = (
         "Предложение отправлено следующему ближайшему работнику."
         if next_id
@@ -314,4 +330,12 @@ def complete_order(db: Session, user: User, order_id: uuid.UUID) -> OrderSummary
     db.refresh(order)
     if wp is not None:
         db.refresh(wp)
+
+    employer = db.get(User, order.employer_id)
+    if employer:
+        notify_order_completed(employer.email, employer.formatted_fio, order.title)
+    worker_user = db.get(User, order.assigned_worker_id)
+    if worker_user:
+        notify_order_completed(worker_user.email, worker_user.formatted_fio, order.title)
+
     return _order_summary(order)
