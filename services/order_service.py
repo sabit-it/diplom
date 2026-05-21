@@ -194,6 +194,20 @@ def respond_to_offer(
     employer = db.get(User, order.employer_id)
 
     if accept:
+        # Race-condition guard: проверяем, что у воркера нет уже активного заказа
+        existing = db.execute(
+            select(Order).where(
+                Order.assigned_worker_id == worker.id,
+                Order.status == OrderStatus.assigned.value,
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="У вас уже есть активный заказ",
+            )
+
+    if accept:
         offer.status = OfferStatus.accepted.value
         offer.responded_at = _now()
         order.assigned_worker_id = worker.id
@@ -338,4 +352,26 @@ def complete_order(db: Session, user: User, order_id: uuid.UUID) -> OrderSummary
     if worker_user:
         notify_order_completed(worker_user.email, worker_user.formatted_fio, order.title)
 
+    return _order_summary(order)
+
+
+def cancel_order(db: Session, employer: User, order_id: uuid.UUID) -> OrderSummary:
+    order = get_order_by_id(db, order_id)
+    if order is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+
+    if order.employer_id != employer.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    cancellable = {OrderStatus.pending_offer.value, OrderStatus.no_workers_available.value}
+    if order.status not in cancellable:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Отменить можно только заказ в статусе pending_offer или no_workers_available",
+        )
+
+    order.status = OrderStatus.cancelled.value
+    db.add(order)
+    db.commit()
+    db.refresh(order)
     return _order_summary(order)

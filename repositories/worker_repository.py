@@ -4,11 +4,37 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from models.order import Order
+from models.order_offer import OrderOffer
 from models.user import User
 from models.worker_profile import WorkerProfile
 from repositories.profession_repository import require_active_profession
-from utils.enums import UserRole
+from utils.enums import OfferStatus, OrderStatus, UserRole
 from utils.geo import haversine_meters
+
+
+def get_busy_worker_ids(db: Session) -> set[uuid.UUID]:
+    """
+    Возвращает id воркеров, которые сейчас недоступны для новых заказов:
+    - уже назначены на заказ (assigned)
+    - имеют ожидающий ответа оффер (sent) по любому заказу
+    """
+    assigned_ids = set(
+        db.execute(
+            select(Order.assigned_worker_id).where(
+                Order.status == OrderStatus.assigned.value,
+                Order.assigned_worker_id.is_not(None),
+            )
+        ).scalars()
+    )
+    pending_offer_ids = set(
+        db.execute(
+            select(OrderOffer.worker_id).where(
+                OrderOffer.status == OfferStatus.sent.value,
+            )
+        ).scalars()
+    )
+    return assigned_ids | pending_offer_ids
 
 
 def _worker_coords(
@@ -31,6 +57,11 @@ def find_nearest_available_worker(
     exclude_worker_ids: set[uuid.UUID],
 ) -> tuple[User, WorkerProfile, float] | None:
     require_active_profession(db, profession_id)
+
+    # Исключаем воркеров занятых любым другим заказом или оффером
+    busy_ids = get_busy_worker_ids(db)
+    skip = exclude_worker_ids | busy_ids
+
     q = (
         select(User, WorkerProfile)
         .join(WorkerProfile, WorkerProfile.user_id == User.id)
@@ -42,7 +73,7 @@ def find_nearest_available_worker(
     )
     candidates: list[tuple[User, WorkerProfile, float]] = []
     for user, profile in db.execute(q).all():
-        if user.id in exclude_worker_ids:
+        if user.id in skip:
             continue
         coords = _worker_coords(user, profile)
         if coords is None:

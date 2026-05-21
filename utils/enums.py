@@ -18,6 +18,7 @@ class OfferStatus(str, Enum):
     sent = "sent"
     accepted = "accepted"
     declined = "declined"
+    expired = "expired"
 
 
 class ProfessionRateUnit(str, Enum):

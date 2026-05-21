@@ -77,6 +77,24 @@ def notify_no_workers(employer_email: str, order_title: str) -> None:
     )
 
 
+def notify_employer_offer_timed_out(employer_email: str, order_title: str, next_found: bool) -> None:
+    if next_found:
+        body = (
+            f"<p>Исполнитель не успел ответить на предложение по заказу <b>{order_title}</b>.</p>"
+            f"<p>Мы нашли следующего ближайшего исполнителя и отправили ему предложение.</p>"
+        )
+    else:
+        body = (
+            f"<p>Исполнитель не успел ответить на предложение по заказу <b>{order_title}</b>.</p>"
+            f"<p>К сожалению, больше нет доступных исполнителей. Попробуйте создать заказ позже.</p>"
+        )
+    send_email(
+        to=employer_email,
+        subject="Обновление по вашему заказу",
+        body=body,
+    )
+
+
 def notify_order_completed(email: str, name: str, order_title: str) -> None:
     send_email(
         to=email,

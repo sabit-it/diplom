@@ -18,6 +18,7 @@ from schemas.order import (
     PendingOfferForWorker,
 )
 from services.order_service import (
+    cancel_order,
     complete_order,
     create_order_with_dispatch,
     get_order_participant_view,
@@ -102,6 +103,24 @@ def read_order(
     user: User = Depends(get_current_active_user),
 ) -> OrderParticipantView:
     return get_order_participant_view(db, user=user, order_id=order_id)
+
+
+@router.patch(
+    "/{order_id}/cancel",
+    response_model=OrderSummary,
+    summary="Отменить заказ",
+    description=(
+        "Доступно только **заказчику** (владельцу заказа). "
+        "Заказ можно отменить только пока он в статусе **pending_offer** или **no_workers_available**. "
+        "После принятия исполнителем (`assigned`) отмена недоступна."
+    ),
+)
+def cancel_order_endpoint(
+    order_id: UUID,
+    db: Session = Depends(get_db),
+    employer: User = Depends(require_employer),
+) -> OrderSummary:
+    return cancel_order(db, employer, order_id)
 
 
 @router.post(

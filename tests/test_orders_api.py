@@ -22,6 +22,7 @@ WORKER_LAT = "55.752000"
 WORKER_LNG = "37.619000"
 
 _SVC = "services.order_service"
+_EXP = "services.offer_expiry"
 
 
 # ---------------------------------------------------------------------------
@@ -113,6 +114,8 @@ def _no_emails():
         patch(f"{_SVC}.notify_employer_worker_declined"),
         patch(f"{_SVC}.notify_no_workers"),
         patch(f"{_SVC}.notify_order_completed"),
+        patch(f"{_EXP}.notify_employer_offer_timed_out"),
+        patch(f"{_EXP}.notify_worker_new_offer"),
     ):
         yield
 
@@ -134,6 +137,102 @@ def profession(db: Session) -> int:
     db.commit()
     db.refresh(p)
     return p.id
+
+
+# ---------------------------------------------------------------------------
+# «Один заказ за раз» — поведение как в Яндекс Такси
+# ---------------------------------------------------------------------------
+
+class TestWorkerBusyExclusion:
+
+    def test_worker_with_sent_offer_not_dispatched_again(self, client, db, profession):
+        """Воркер с активным оффером (sent) не получает новый заказ от другого заказчика."""
+        _, emp1_token = register_employer(client)
+        _, emp2_token = register_employer(client)
+        _, wrk_token = register_worker(client)
+        make_worker_profile(db, get_user_id(client, wrk_token), profession)
+
+        # Первый заказ — оффер уходит воркеру, он ещё не ответил
+        client.post("/orders/", json=order_payload(profession), headers=bearer(emp1_token))
+
+        # Второй заказ — воркер занят (sent), должно быть no_workers_available
+        resp2 = client.post("/orders/", json=order_payload(profession), headers=bearer(emp2_token))
+        assert resp2.status_code == 201
+        assert resp2.json()["order"]["status"] == "no_workers_available"
+
+    def test_worker_with_assigned_order_not_dispatched(self, client, db, profession):
+        """Воркер с активным заказом (assigned) не получает новые офферы."""
+        _, emp1_token = register_employer(client)
+        _, emp2_token = register_employer(client)
+        _, wrk_token = register_worker(client)
+        make_worker_profile(db, get_user_id(client, wrk_token), profession)
+
+        # Воркер принимает первый заказ
+        resp1 = client.post("/orders/", json=order_payload(profession), headers=bearer(emp1_token))
+        offer_id = resp1.json()["active_offer_id"]
+        client.post(f"/orders/offers/{offer_id}/respond", json={"accept": True}, headers=bearer(wrk_token))
+
+        # Второй заказ — воркер занят (assigned), должно быть no_workers_available
+        resp2 = client.post("/orders/", json=order_payload(profession), headers=bearer(emp2_token))
+        assert resp2.status_code == 201
+        assert resp2.json()["order"]["status"] == "no_workers_available"
+
+    def test_worker_becomes_available_after_completing_order(self, client, db, profession):
+        """После завершения заказа воркер снова получает офферы."""
+        _, emp1_token = register_employer(client)
+        _, emp2_token = register_employer(client)
+        _, wrk_token = register_worker(client)
+        make_worker_profile(db, get_user_id(client, wrk_token), profession)
+
+        # Первый заказ — принять и завершить
+        resp1 = client.post("/orders/", json=order_payload(profession), headers=bearer(emp1_token))
+        order1_id = resp1.json()["order"]["id"]
+        offer_id = resp1.json()["active_offer_id"]
+        client.post(f"/orders/offers/{offer_id}/respond", json={"accept": True}, headers=bearer(wrk_token))
+        client.patch(f"/orders/{order1_id}/complete", headers=bearer(wrk_token))
+
+        # Второй заказ — воркер свободен, должен получить оффер
+        resp2 = client.post("/orders/", json=order_payload(profession), headers=bearer(emp2_token))
+        assert resp2.status_code == 201
+        assert resp2.json()["order"]["status"] == "pending_offer"
+
+    def test_accept_second_order_while_assigned_rejected(self, client, db, profession):
+        """Race condition: воркер не может принять второй заказ пока назначен на первый."""
+        _, emp1_token = register_employer(client)
+        _, emp2_token = register_employer(client)
+        _, wrk1_token = register_worker(client)
+        _, wrk2_token = register_worker(client)
+        wrk1_id = get_user_id(client, wrk1_token)
+        wrk2_id = get_user_id(client, wrk2_token)
+        # wrk1 ближе, wrk2 дальше — оба доступны
+        make_worker_profile(db, wrk1_id, profession, lat="55.752000", lng="37.619000")
+        make_worker_profile(db, wrk2_id, profession, lat="55.900000", lng="37.800000")
+
+        # Первый заказ уходит wrk1 (ближайший), он принимает
+        resp1 = client.post("/orders/", json=order_payload(profession), headers=bearer(emp1_token))
+        offer1_id = resp1.json()["active_offer_id"]
+        client.post(f"/orders/offers/{offer1_id}/respond", json={"accept": True}, headers=bearer(wrk1_token))
+
+        # Второй заказ уходит wrk2 (единственный свободный)
+        resp2 = client.post("/orders/", json=order_payload(profession), headers=bearer(emp2_token))
+        assert resp2.json()["order"]["status"] == "pending_offer"
+        offer2_id = resp2.json()["active_offer_id"]
+
+        # wrk1 пытается принять второй оффер вручную (race condition) — должен получить 409
+        resp = client.post(
+            f"/orders/offers/{offer2_id}/respond",
+            json={"accept": True},
+            headers=bearer(wrk1_token),
+        )
+        assert resp.status_code == 404  # оффер не его
+
+        # wrk2 принимает — всё нормально
+        resp = client.post(
+            f"/orders/offers/{offer2_id}/respond",
+            json={"accept": True},
+            headers=bearer(wrk2_token),
+        )
+        assert resp.status_code == 200
 
 
 # ---------------------------------------------------------------------------
@@ -546,3 +645,192 @@ class TestCompleteOrder:
             select(WorkerProfile).where(WorkerProfile.user_id == worker_id)
         ).scalar_one()
         assert wp.completed_orders == 1
+
+
+# ---------------------------------------------------------------------------
+# PATCH /orders/{order_id}/cancel
+# ---------------------------------------------------------------------------
+
+class TestCancelOrder:
+
+    def test_employer_cancels_pending_offer(self, client, profession):
+        _, emp_token = register_employer(client)
+        resp = client.post("/orders/", json=order_payload(profession), headers=bearer(emp_token))
+        order_id = resp.json()["order"]["id"]
+
+        cancel_resp = client.patch(f"/orders/{order_id}/cancel", headers=bearer(emp_token))
+        assert cancel_resp.status_code == 200
+        assert cancel_resp.json()["status"] == "cancelled"
+
+    def test_employer_cancels_no_workers_available(self, client, profession):
+        _, emp_token = register_employer(client)
+        resp = client.post("/orders/", json=order_payload(profession), headers=bearer(emp_token))
+        order_id = resp.json()["order"]["id"]
+        assert resp.json()["order"]["status"] == "no_workers_available"
+
+        cancel_resp = client.patch(f"/orders/{order_id}/cancel", headers=bearer(emp_token))
+        assert cancel_resp.status_code == 200
+        assert cancel_resp.json()["status"] == "cancelled"
+
+    def test_cannot_cancel_assigned_order(self, client, db, profession):
+        _, emp_token = register_employer(client)
+        _, wrk_token = register_worker(client)
+        make_worker_profile(db, get_user_id(client, wrk_token), profession)
+
+        create_resp = client.post("/orders/", json=order_payload(profession), headers=bearer(emp_token))
+        order_id = create_resp.json()["order"]["id"]
+        offer_id = create_resp.json()["active_offer_id"]
+        client.post(f"/orders/offers/{offer_id}/respond", json={"accept": True}, headers=bearer(wrk_token))
+
+        resp = client.patch(f"/orders/{order_id}/cancel", headers=bearer(emp_token))
+        assert resp.status_code == 409
+
+    def test_cannot_cancel_completed_order(self, client, db, profession):
+        _, emp_token = register_employer(client)
+        _, wrk_token = register_worker(client)
+        make_worker_profile(db, get_user_id(client, wrk_token), profession)
+
+        create_resp = client.post("/orders/", json=order_payload(profession), headers=bearer(emp_token))
+        order_id = create_resp.json()["order"]["id"]
+        offer_id = create_resp.json()["active_offer_id"]
+        client.post(f"/orders/offers/{offer_id}/respond", json={"accept": True}, headers=bearer(wrk_token))
+        client.patch(f"/orders/{order_id}/complete", headers=bearer(emp_token))
+
+        resp = client.patch(f"/orders/{order_id}/cancel", headers=bearer(emp_token))
+        assert resp.status_code == 409
+
+    def test_worker_cannot_cancel(self, client, profession):
+        _, emp_token = register_employer(client)
+        _, wrk_token = register_worker(client)
+        resp = client.post("/orders/", json=order_payload(profession), headers=bearer(emp_token))
+        order_id = resp.json()["order"]["id"]
+
+        cancel_resp = client.patch(f"/orders/{order_id}/cancel", headers=bearer(wrk_token))
+        assert cancel_resp.status_code == 403
+
+    def test_other_employer_cannot_cancel(self, client, profession):
+        _, emp_token = register_employer(client)
+        _, other_token = register_employer(client)
+        resp = client.post("/orders/", json=order_payload(profession), headers=bearer(emp_token))
+        order_id = resp.json()["order"]["id"]
+
+        cancel_resp = client.patch(f"/orders/{order_id}/cancel", headers=bearer(other_token))
+        assert cancel_resp.status_code == 403
+
+    def test_not_found(self, client):
+        _, token = register_employer(client)
+        resp = client.patch(f"/orders/{uuid.uuid4()}/cancel", headers=bearer(token))
+        assert resp.status_code == 404
+
+    def test_requires_auth(self, client, profession):
+        _, emp_token = register_employer(client)
+        resp = client.post("/orders/", json=order_payload(profession), headers=bearer(emp_token))
+        order_id = resp.json()["order"]["id"]
+        assert client.patch(f"/orders/{order_id}/cancel").status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Offer expiry (unit-style: вызываем expire_offer напрямую с test-сессией)
+# ---------------------------------------------------------------------------
+
+class TestOfferExpiry:
+
+    def test_expire_no_next_worker(self, client, db, profession):
+        """Оффер истекает, следующих воркеров нет → заказ становится no_workers_available."""
+        _, emp_token = register_employer(client)
+        _, wrk_token = register_worker(client)
+        make_worker_profile(db, get_user_id(client, wrk_token), profession)
+
+        resp = client.post("/orders/", json=order_payload(profession), headers=bearer(emp_token))
+        offer_id = uuid.UUID(resp.json()["active_offer_id"])
+        order_id = resp.json()["order"]["id"]
+
+        from services.offer_expiry import expire_offer
+        result = expire_offer(db, offer_id)
+        assert result is True
+        db.flush()
+
+        order_resp = client.get(f"/orders/{order_id}", headers=bearer(emp_token))
+        assert order_resp.json()["order"]["status"] == "no_workers_available"
+
+    def test_expire_dispatches_next_worker(self, client, db, profession):
+        """Оффер истекает, есть второй воркер → новый оффер уходит второму."""
+        _, emp_token = register_employer(client)
+        _, wrk1_token = register_worker(client)
+        _, wrk2_token = register_worker(client)
+        make_worker_profile(db, get_user_id(client, wrk1_token), profession, lat="55.752000", lng="37.619000")
+        make_worker_profile(db, get_user_id(client, wrk2_token), profession, lat="55.800000", lng="37.700000")
+
+        resp = client.post("/orders/", json=order_payload(profession), headers=bearer(emp_token))
+        offer_id = uuid.UUID(resp.json()["active_offer_id"])
+        order_id = resp.json()["order"]["id"]
+
+        from services.offer_expiry import expire_offer
+        expire_offer(db, offer_id)
+        db.flush()
+
+        # Второй воркер должен видеть новый оффер
+        pending = client.get("/orders/pending-offers", headers=bearer(wrk2_token)).json()
+        assert len(pending) == 1
+        assert pending[0]["order"]["id"] == order_id
+
+        # Заказ остаётся в pending_offer
+        order_resp = client.get(f"/orders/{order_id}", headers=bearer(emp_token))
+        assert order_resp.json()["order"]["status"] == "pending_offer"
+
+    def test_expire_already_responded_offer(self, client, db, profession):
+        """Принятый оффер не обрабатывается повторно."""
+        _, emp_token = register_employer(client)
+        _, wrk_token = register_worker(client)
+        make_worker_profile(db, get_user_id(client, wrk_token), profession)
+
+        resp = client.post("/orders/", json=order_payload(profession), headers=bearer(emp_token))
+        offer_id = uuid.UUID(resp.json()["active_offer_id"])
+
+        client.post(f"/orders/offers/{offer_id}/respond", json={"accept": True}, headers=bearer(wrk_token))
+
+        from services.offer_expiry import expire_offer
+        result = expire_offer(db, offer_id)
+        assert result is False  # Оффер уже не в статусе 'sent'
+
+    def test_expire_nonexistent_offer(self, client, db):
+        """Несуществующий оффер возвращает False."""
+        from services.offer_expiry import expire_offer
+        result = expire_offer(db, uuid.uuid4())
+        assert result is False
+
+    def test_expired_offer_not_shown_in_pending(self, client, db, profession):
+        """Истёкший оффер не должен отображаться в pending-offers воркера."""
+        _, emp_token = register_employer(client)
+        _, wrk_token = register_worker(client)
+        make_worker_profile(db, get_user_id(client, wrk_token), profession)
+
+        resp = client.post("/orders/", json=order_payload(profession), headers=bearer(emp_token))
+        offer_id = uuid.UUID(resp.json()["active_offer_id"])
+
+        from services.offer_expiry import expire_offer
+        expire_offer(db, offer_id)
+        db.flush()
+
+        pending = client.get("/orders/pending-offers", headers=bearer(wrk_token)).json()
+        assert pending == []
+
+    def test_respond_to_expired_offer_conflicts(self, client, db, profession):
+        """После истечения воркер не может принять оффер — 409."""
+        _, emp_token = register_employer(client)
+        _, wrk_token = register_worker(client)
+        make_worker_profile(db, get_user_id(client, wrk_token), profession)
+
+        resp = client.post("/orders/", json=order_payload(profession), headers=bearer(emp_token))
+        offer_id = uuid.UUID(resp.json()["active_offer_id"])
+
+        from services.offer_expiry import expire_offer
+        expire_offer(db, offer_id)
+        db.flush()
+
+        respond_resp = client.post(
+            f"/orders/offers/{offer_id}/respond",
+            json={"accept": True},
+            headers=bearer(wrk_token),
+        )
+        assert respond_resp.status_code == 409

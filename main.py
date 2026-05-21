@@ -1,7 +1,16 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from core.config import settings
+from services.offer_expiry import start_expiry_thread
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    start_expiry_thread()
+    yield
 from api.auth import router as auth_router
 from api.messages import router as messages_router
 from api.offers import router as offers_router
@@ -95,6 +104,7 @@ OPENAPI_TAGS = [
 ]
 
 app = FastAPI(
+    lifespan=lifespan,
     title="Подработка — API",
     description=OPENAPI_DESCRIPTION,
     version="0.1.0",
