@@ -62,10 +62,13 @@ def _handle_expired_offer(db: Session, offer: OrderOffer) -> None:
     offer.responded_at = datetime.now(timezone.utc)
 
     order = db.get(Order, offer.order_id)
+    # Если заказ уже не ждёт ответа (например, его успели отменить или принять
+    # через другой оффер) — просто фиксируем истечение и выходим.
     if order is None or order.status != OrderStatus.pending_offer.value:
         return
 
     employer = db.get(User, order.employer_id)
+    # Не слать оффер тем, кто уже отказал или у кого он истёк по этому заказу.
     exclude = worker_ids_with_offers_for_order(db, order.id)
 
     try:
@@ -77,9 +80,11 @@ def _handle_expired_offer(db: Session, offer: OrderOffer) -> None:
             exclude_worker_ids=exclude,
         )
     except HTTPException:
+        # Профессия могла быть деактивирована после создания заказа.
         nearest = None
 
     if nearest is None:
+        # Больше никого нет — заказ переходит в «нет кандидатов».
         order.status = OrderStatus.no_workers_available.value
         if employer:
             notify_employer_offer_timed_out(employer.email, order.title, next_found=False)
@@ -103,6 +108,9 @@ def _handle_expired_offer(db: Session, offer: OrderOffer) -> None:
 def _process_one(offer_id: uuid.UUID) -> None:
     with Session(engine) as session:
         with session.begin():
+            # FOR UPDATE SKIP LOCKED: если оффер уже захвачен другим процессом
+            # uvicorn — пропускаем его, не ждём разблокировки. Каждый оффер
+            # обрабатывается ровно один раз даже при нескольких воркерах.
             offer = session.execute(
                 select(OrderOffer)
                 .where(
@@ -113,7 +121,7 @@ def _process_one(offer_id: uuid.UUID) -> None:
             ).scalar_one_or_none()
 
             if offer is None:
-                return  # Already processed by another worker process
+                return  # Уже обработан другим процессом или принят/отклонён вручную.
 
             _handle_expired_offer(session, offer)
 
@@ -121,6 +129,8 @@ def _process_one(offer_id: uuid.UUID) -> None:
 def _expire_due_offers() -> None:
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=_OFFER_TIMEOUT_SECONDS)
 
+    # Читаем только ID в отдельной сессии — так мы не держим открытую транзакцию
+    # пока обрабатываем каждый оффер по очереди (каждый в своей сессии с SKIP LOCKED).
     with Session(engine) as session:
         expired_ids: list[uuid.UUID] = list(
             session.execute(

@@ -14,11 +14,10 @@ from utils.geo import haversine_meters
 
 
 def get_busy_worker_ids(db: Session) -> set[uuid.UUID]:
-    """
-    Возвращает id воркеров, которые сейчас недоступны для новых заказов:
-    - уже назначены на заказ (assigned)
-    - имеют ожидающий ответа оффер (sent) по любому заказу
-    """
+    # Работник занят в двух случаях:
+    # 1. он уже принял заказ и работает (assigned)
+    # 2. ему отправлен оффер и он ещё не ответил (sent)
+    # Оба случая исключаем — нельзя слать новый оффер, пока предыдущий висит в воздухе.
     assigned_ids = set(
         db.execute(
             select(Order.assigned_worker_id).where(
@@ -58,10 +57,13 @@ def find_nearest_available_worker(
 ) -> tuple[User, WorkerProfile, float] | None:
     require_active_profession(db, profession_id)
 
-    # Исключаем воркеров занятых любым другим заказом или оффером
+    # Глобально занятые (assigned/sent по любому заказу) + уже получавшие
+    # оффер по этому конкретному заказу (чтоб не слать второй раз).
     busy_ids = get_busy_worker_ids(db)
     skip = exclude_worker_ids | busy_ids
 
+    # Базовый фильтр: роль, профессия, онлайн. Координаты проверяем вручную —
+    # они хранятся в двух местах (profile.current_* или user.lat/lng).
     q = (
         select(User, WorkerProfile)
         .join(WorkerProfile, WorkerProfile.user_id == User.id)
@@ -77,6 +79,7 @@ def find_nearest_available_worker(
             continue
         coords = _worker_coords(user, profile)
         if coords is None:
+            # Нет координат — работник не участвует в подборе по гео.
             continue
         wlat, wlng = coords
         dist = haversine_meters(order_lat, order_lng, wlat, wlng)
@@ -84,6 +87,7 @@ def find_nearest_available_worker(
 
     if not candidates:
         return None
+    # Сортируем по расстоянию и берём ближайшего.
     candidates.sort(key=lambda x: x[2])
     user, profile, dist = candidates[0]
     return user, profile, dist
