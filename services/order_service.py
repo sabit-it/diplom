@@ -14,7 +14,13 @@ from repositories.offer_repository import (
     list_pending_sent_offers_for_worker,
     worker_ids_with_offers_for_order,
 )
-from repositories.order_repository import create_order, get_order_by_id, save_order
+from repositories.order_repository import (
+    create_order,
+    get_order_by_id,
+    list_orders_for_employer,
+    list_orders_for_worker,
+    save_order,
+)
 from repositories.profession_repository import require_active_profession
 from repositories.worker_repository import find_nearest_available_worker
 from schemas.order import (
@@ -36,6 +42,7 @@ from services.email_service import (
     notify_no_workers,
     notify_order_completed,
     notify_worker_new_offer,
+    notify_worker_order_cancelled,
 )
 
 
@@ -371,15 +378,66 @@ def cancel_order(db: Session, employer: User, order_id: uuid.UUID) -> OrderSumma
     if order.employer_id != employer.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
-    cancellable = {OrderStatus.pending_offer.value, OrderStatus.no_workers_available.value}
+    cancellable = {
+        OrderStatus.pending_offer.value,
+        OrderStatus.no_workers_available.value,
+        OrderStatus.assigned.value,
+    }
     if order.status not in cancellable:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Отменить можно только заказ в статусе pending_offer или no_workers_available",
+            detail="Отменить можно только заказ в статусе pending_offer, no_workers_available или assigned",
         )
+
+    was_assigned = order.status == OrderStatus.assigned.value
+    worker_id = order.assigned_worker_id
 
     order.status = OrderStatus.cancelled.value
     db.add(order)
     db.commit()
     db.refresh(order)
+
+    # Уведомляем работника, если заказ был уже принят им.
+    if was_assigned and worker_id is not None:
+        worker_user = db.get(User, worker_id)
+        if worker_user:
+            notify_worker_order_cancelled(worker_user.email, worker_user.formatted_fio, order.title)
+
     return _order_summary(order)
+
+
+def list_orders_for_user(
+    db: Session,
+    user: User,
+    *,
+    status_filter: str | None = None,
+) -> list[OrderSummary]:
+    from utils.enums import UserRole
+    if user.role == UserRole.employer.value:
+        orders = list_orders_for_employer(db, user.id, status=status_filter)
+    else:
+        orders = list_orders_for_worker(db, user.id, status=status_filter)
+    return [_order_summary(o) for o in orders]
+
+
+def repeat_order(db: Session, employer: User, order_id: uuid.UUID) -> OrderCreateResult:
+    original = get_order_by_id(db, order_id)
+    if original is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+
+    if original.employer_id != employer.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    # Копируем параметры из оригинала, сбрасываем scheduled_at — заказ немедленный.
+    payload = OrderCreate(
+        profession_id=original.profession_id,
+        title=original.title,
+        description=original.description,
+        hours=original.hours,
+        hourly_rate=original.hourly_rate,
+        address=original.address,
+        lat=original.lat,
+        lng=original.lng,
+        scheduled_at=None,
+    )
+    return create_order_with_dispatch(db, employer, payload)

@@ -1,7 +1,7 @@
 from typing import Union
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from core.database import get_db
@@ -22,9 +22,12 @@ from services.order_service import (
     complete_order,
     create_order_with_dispatch,
     get_order_participant_view,
+    list_orders_for_user,
     list_pending_offers_for_worker,
+    repeat_order,
     respond_to_offer,
 )
+from utils.enums import OrderStatus
 
 router = APIRouter(prefix="/orders", tags=["Заказы"])
 
@@ -50,6 +53,25 @@ def create_order(
     employer: User = Depends(require_employer),
 ) -> OrderCreateResult:
     return create_order_with_dispatch(db, employer, payload)
+
+
+@router.get(
+    "/my",
+    response_model=list[OrderSummary],
+    summary="Моя история заказов",
+    description=(
+        "Для **employer** — заказы, которые он создавал. "
+        "Для **worker** — заказы, в которых он был назначен исполнителем. "
+        "Опциональный параметр `status` фильтрует по статусу (`pending_offer`, `assigned`, `completed`, `cancelled`, `no_workers_available`). "
+        "Результат отсортирован по убыванию даты создания."
+    ),
+)
+def list_my_orders(
+    status: OrderStatus | None = Query(default=None, description="Фильтр по статусу заказа."),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_active_user),
+) -> list[OrderSummary]:
+    return list_orders_for_user(db, user, status_filter=status.value if status else None)
 
 
 @router.get(
@@ -105,14 +127,33 @@ def read_order(
     return get_order_participant_view(db, user=user, order_id=order_id)
 
 
+@router.post(
+    "/{order_id}/repeat",
+    response_model=OrderCreateResult,
+    status_code=status.HTTP_201_CREATED,
+    summary="Повторить заказ",
+    description=(
+        "Создаёт новый заказ с теми же параметрами (профессия, название, адрес, стоимость), "
+        "что и указанный. `scheduled_at` сбрасывается — заказ размещается немедленно. "
+        "Доступно только **заказчику** — владельцу исходного заказа."
+    ),
+)
+def repeat_order_endpoint(
+    order_id: UUID,
+    db: Session = Depends(get_db),
+    employer: User = Depends(require_employer),
+) -> OrderCreateResult:
+    return repeat_order(db, employer, order_id)
+
+
 @router.patch(
     "/{order_id}/cancel",
     response_model=OrderSummary,
     summary="Отменить заказ",
     description=(
         "Доступно только **заказчику** (владельцу заказа). "
-        "Заказ можно отменить только пока он в статусе **pending_offer** или **no_workers_available**. "
-        "После принятия исполнителем (`assigned`) отмена недоступна."
+        "Заказ можно отменить в статусах **pending_offer**, **no_workers_available** и **assigned**. "
+        "При отмене уже принятого (`assigned`) заказа исполнитель получает email‑уведомление."
     ),
 )
 def cancel_order_endpoint(

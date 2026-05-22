@@ -53,6 +53,54 @@ def create_user(
     return user
 
 
+def update_user_profile(
+    db: Session,
+    user: User,
+    *,
+    first_name: str | None,
+    last_name: str | None,
+    patronymic: str | None,
+    phone: str | None,
+    photo_url: str | None,
+    _clear_phone: bool,
+    _clear_photo: bool,
+    _clear_patronymic: bool,
+) -> User:
+    if first_name is not None:
+        user.first_name = first_name.strip()
+    if last_name is not None:
+        user.last_name = last_name.strip()
+    if _clear_patronymic:
+        user.patronymic = None
+    elif patronymic is not None:
+        user.patronymic = patronymic.strip() or None
+    if _clear_phone:
+        user.phone = None
+    elif phone is not None:
+        user.phone = phone
+    if _clear_photo:
+        user.photo_url = None
+    elif photo_url is not None:
+        user.photo_url = photo_url.strip() or None
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def update_user_email(db: Session, user: User, new_email: str) -> User:
+    user.email = new_email
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def update_user_password(db: Session, user: User, new_hash: str) -> User:
+    user.password_hash = new_hash
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 def update_user_location(
     db: Session,
     user_id: uuid.UUID,

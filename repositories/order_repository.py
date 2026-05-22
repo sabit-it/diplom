@@ -56,6 +56,27 @@ def save_order(db: Session, order: Order) -> Order:
     return order
 
 
-def list_orders_for_employer(db: Session, employer_id: uuid.UUID) -> list[Order]:
-    q = select(Order).where(Order.employer_id == employer_id).order_by(Order.created_at.desc())
+def list_orders_for_employer(
+    db: Session,
+    employer_id: uuid.UUID,
+    *,
+    status: str | None = None,
+) -> list[Order]:
+    q = select(Order).where(Order.employer_id == employer_id)
+    if status is not None:
+        q = q.where(Order.status == status)
+    q = q.order_by(Order.created_at.desc())
+    return list(db.execute(q).scalars().all())
+
+
+def list_orders_for_worker(
+    db: Session,
+    worker_id: uuid.UUID,
+    *,
+    status: str | None = None,
+) -> list[Order]:
+    q = select(Order).where(Order.assigned_worker_id == worker_id)
+    if status is not None:
+        q = q.where(Order.status == status)
+    q = q.order_by(Order.created_at.desc())
     return list(db.execute(q).scalars().all())

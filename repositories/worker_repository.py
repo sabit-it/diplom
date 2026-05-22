@@ -83,6 +83,9 @@ def find_nearest_available_worker(
             continue
         wlat, wlng = coords
         dist = haversine_meters(order_lat, order_lng, wlat, wlng)
+        # Если работник задал максимальное расстояние — заказы дальше него не предлагаем.
+        if profile.max_distance_km is not None and dist > profile.max_distance_km * 1000:
+            continue
         candidates.append((user, profile, dist))
 
     if not candidates:

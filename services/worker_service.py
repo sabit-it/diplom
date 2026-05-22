@@ -32,6 +32,7 @@ def _to_profile_out(db: Session, profile: WorkerProfile) -> WorkerProfileOut:
         user_id=profile.user_id,
         profession=ProfessionOut.model_validate(prof),
         about=profile.about,
+        max_distance_km=profile.max_distance_km,
         rating_avg=profile.rating_avg,
         reviews_count=profile.reviews_count,
         completed_orders=profile.completed_orders,
@@ -76,11 +77,13 @@ def upsert_my_worker_profile(
             user_id=user.id,
             profession_id=payload.profession_id,
             about=about,
+            max_distance_km=payload.max_distance_km,
         )
         db.add(wp)
     else:
         wp.profession_id = payload.profession_id
         wp.about = about
+        wp.max_distance_km = payload.max_distance_km
     persist_worker_profile(db, wp)
     return _to_profile_out(db, wp)
 

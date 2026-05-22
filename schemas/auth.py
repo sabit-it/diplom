@@ -124,6 +124,67 @@ class TokenResponse(BaseModel):
     )
 
 
+class UserProfileUpdate(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "first_name": "Иван",
+                "last_name": "Иванов",
+                "patronymic": "Иванович",
+                "phone": "+79990001122",
+                "photo_url": "https://cdn.example.com/photo.jpg",
+            },
+        },
+    )
+
+    first_name: str | None = Field(default=None, min_length=1, max_length=255, description="Имя.")
+    last_name: str | None = Field(default=None, min_length=1, max_length=255, description="Фамилия.")
+    patronymic: str | None = Field(default=None, max_length=255, description="Отчество; передайте пустую строку или null, чтобы очистить.")
+    phone: str | None = Field(default=None, max_length=32, description="Телефон в международном формате; null — убрать номер.")
+    photo_url: str | None = Field(default=None, max_length=512, description="URL фото профиля; null — убрать фото.")
+
+    @field_validator("patronymic", mode="before")
+    @classmethod
+    def empty_patronymic_to_none(cls, v):
+        if v == "":
+            return None
+        return v
+
+    @field_validator("phone", mode="before")
+    @classmethod
+    def empty_phone_to_none(cls, v):
+        if v == "":
+            return None
+        return v
+
+
+class EmailChangeRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {"new_email": "new@example.com", "current_password": "secret12345"},
+        },
+    )
+
+    new_email: EmailStr = Field(..., min_length=3, max_length=255, description="Новый email.")
+    current_password: str = Field(..., description="Текущий пароль для подтверждения.")
+
+    @field_validator("new_email")
+    @classmethod
+    def normalize_email(cls, v: str) -> str:
+        return v.strip().lower()
+
+
+class PasswordChangeRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {"current_password": "oldSecret1", "new_password": "newSecret2"},
+        },
+    )
+
+    current_password: str = Field(..., description="Текущий пароль.")
+    new_password: str = Field(..., min_length=8, max_length=128, description="Новый пароль (мин. 8 символов).")
+
+
 class UserLocationUpdate(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={"example": {"lat": "55.751244", "lng": "37.618423"}},

@@ -7,13 +7,16 @@ from core.dependencies import get_current_active_user
 from models.user import User
 from repositories.user_repository import update_user_location
 from schemas.auth import (
+    EmailChangeRequest,
     LoginRequest,
+    PasswordChangeRequest,
     RegisterRequest,
     TokenResponse,
     UserLocationUpdate,
+    UserProfileUpdate,
     UserPublic,
 )
-from services.auth_service import login_user, register_user
+from services.auth_service import change_email, change_password, login_user, register_user, update_profile
 
 router = APIRouter(prefix="/auth", tags=["Авторизация"])
 
@@ -82,6 +85,58 @@ def read_current_user(
     current_user: User = Depends(get_current_active_user),
 ) -> User:
     return current_user
+
+
+@router.patch(
+    "/me",
+    response_model=UserPublic,
+    summary="Редактировать профиль",
+    description=(
+        "Обновляет имя, фамилию, отчество, телефон или фото профиля. "
+        "Передавайте только те поля, которые нужно изменить — остальные останутся прежними. "
+        "Чтобы **очистить** поле (например убрать телефон), явно передайте `null`. "
+        "Для смены email используйте `PATCH /auth/me/email`, для пароля — `PATCH /auth/me/password`."
+    ),
+)
+def update_my_profile(
+    payload: UserProfileUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> User:
+    return update_profile(db, current_user, payload)
+
+
+@router.patch(
+    "/me/email",
+    response_model=UserPublic,
+    summary="Сменить email",
+    description=(
+        "Меняет email текущего пользователя. Требует подтверждения текущего пароля. "
+        "Новый email должен быть уникальным в системе."
+    ),
+)
+def update_my_email(
+    payload: EmailChangeRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> User:
+    return change_email(db, current_user, payload)
+
+
+@router.patch(
+    "/me/password",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
+    summary="Сменить пароль",
+    description="Меняет пароль. Требует передать текущий пароль (`current_password`) и новый (`new_password`, мин. 8 символов).",
+)
+def update_my_password(
+    payload: PasswordChangeRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> Response:
+    change_password(db, current_user, payload)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.patch(

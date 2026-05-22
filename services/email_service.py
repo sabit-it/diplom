@@ -95,6 +95,18 @@ def notify_employer_offer_timed_out(employer_email: str, order_title: str, next_
     )
 
 
+def notify_worker_order_cancelled(worker_email: str, worker_name: str, order_title: str) -> None:
+    send_email(
+        to=worker_email,
+        subject="Заказчик отменил заказ",
+        body=(
+            f"<p>Здравствуйте, {worker_name}!</p>"
+            f"<p>К сожалению, заказчик отменил заказ <b>{order_title}</b>, который был назначен вам.</p>"
+            f"<p>Вы снова доступны для новых заказов.</p>"
+        ),
+    )
+
+
 def notify_order_completed(email: str, name: str, order_title: str) -> None:
     send_email(
         to=email,

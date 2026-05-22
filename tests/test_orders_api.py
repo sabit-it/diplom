@@ -672,7 +672,8 @@ class TestCancelOrder:
         assert cancel_resp.status_code == 200
         assert cancel_resp.json()["status"] == "cancelled"
 
-    def test_cannot_cancel_assigned_order(self, client, db, profession):
+    def test_can_cancel_assigned_order(self, client, db, profession):
+        # Теперь отмена разрешена даже после принятия — работнику уходит email.
         _, emp_token = register_employer(client)
         _, wrk_token = register_worker(client)
         make_worker_profile(db, get_user_id(client, wrk_token), profession)
@@ -683,7 +684,8 @@ class TestCancelOrder:
         client.post(f"/orders/offers/{offer_id}/respond", json={"accept": True}, headers=bearer(wrk_token))
 
         resp = client.patch(f"/orders/{order_id}/cancel", headers=bearer(emp_token))
-        assert resp.status_code == 409
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "cancelled"
 
     def test_cannot_cancel_completed_order(self, client, db, profession):
         _, emp_token = register_employer(client)

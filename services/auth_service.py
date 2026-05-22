@@ -8,12 +8,16 @@ from core.security import (
     verify_password,
 )
 from models.user import User
+from models.user import User
 from repositories.user_repository import (
     create_user,
     get_user_by_email,
     get_user_by_phone,
+    update_user_email,
+    update_user_password,
+    update_user_profile,
 )
-from schemas.auth import TokenResponse
+from schemas.auth import EmailChangeRequest, PasswordChangeRequest, TokenResponse, UserProfileUpdate, UserPublic
 
 
 def _build_token_response(user: User) -> TokenResponse:
@@ -72,6 +76,50 @@ def register_user(
     )
 
     return _build_token_response(user)
+
+
+def update_profile(db: Session, user: User, payload: UserProfileUpdate) -> User:
+    # Различаем "поле не передано" (None) от "передано явно" (пустая строка → очистить).
+    # Pydantic не даёт нам это напрямую, поэтому используем sentinel-логику в репозитории.
+    raw = payload.model_dump(exclude_unset=True)
+    return update_user_profile(
+        db,
+        user,
+        first_name=raw.get("first_name"),
+        last_name=raw.get("last_name"),
+        patronymic=raw.get("patronymic"),
+        phone=raw.get("phone"),
+        photo_url=raw.get("photo_url"),
+        _clear_patronymic="patronymic" in raw and raw["patronymic"] is None,
+        _clear_phone="phone" in raw and raw["phone"] is None,
+        _clear_photo="photo_url" in raw and raw["photo_url"] is None,
+    )
+
+
+def change_email(db: Session, user: User, payload: EmailChangeRequest) -> User:
+    if not verify_password(payload.current_password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Неверный текущий пароль",
+        )
+    new_email = str(payload.new_email).strip().lower()
+    if new_email == user.email:
+        return user
+    if get_user_by_email(db, new_email):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email уже занят",
+        )
+    return update_user_email(db, user, new_email)
+
+
+def change_password(db: Session, user: User, payload: PasswordChangeRequest) -> None:
+    if not verify_password(payload.current_password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Неверный текущий пароль",
+        )
+    update_user_password(db, user, get_password_hash(payload.new_password))
 
 
 def login_user(db: Session, email: str, password: str) -> TokenResponse:

@@ -23,6 +23,8 @@ class WorkerProfile(Base):
     reviews_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     completed_orders: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
+    max_distance_km: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     is_online: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     current_lat: Mapped[Decimal | None] = mapped_column(Numeric(9, 6), nullable=True)
     current_lng: Mapped[Decimal | None] = mapped_column(Numeric(9, 6), nullable=True)

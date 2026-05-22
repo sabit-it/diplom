@@ -24,6 +24,12 @@ class WorkerProfileUpsert(BaseModel):
         max_length=5000,
         description="Кратко о себе; необязательно.",
     )
+    max_distance_km: int | None = Field(
+        default=None,
+        ge=1,
+        le=500,
+        description="Максимальное расстояние до заказа (км). Dispatch не предложит заказ дальше этого радиуса. null — без ограничений.",
+    )
 
 
 class WorkerLinePatch(BaseModel):
@@ -42,6 +48,7 @@ class WorkerProfileOut(BaseModel):
     user_id: UUID
     profession: ProfessionOut
     about: str | None
+    max_distance_km: int | None
     rating_avg: Decimal
     reviews_count: int
     completed_orders: int
