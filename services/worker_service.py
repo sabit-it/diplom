@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -7,11 +9,59 @@ from models.worker_profile import WorkerProfile
 from repositories.profession_repository import require_active_profession
 from repositories.worker_repository import (
     get_worker_profile_by_user_id,
+    list_workers_catalog,
     persist_worker_profile,
 )
 from schemas.profession import ProfessionOut
-from schemas.worker import WorkerLinePatch, WorkerProfileOut, WorkerProfileUpsert
+from schemas.worker import (
+    WorkerCatalogItem,
+    WorkerCatalogOut,
+    WorkerLinePatch,
+    WorkerProfileOut,
+    WorkerProfileUpsert,
+)
 from utils.enums import UserRole
+
+
+def list_workers(
+    db: Session,
+    *,
+    profession_id: int | None,
+    min_rating: Decimal | None,
+    is_online: bool | None,
+    limit: int,
+    offset: int,
+) -> WorkerCatalogOut:
+    rows, total = list_workers_catalog(
+        db,
+        profession_id=profession_id,
+        min_rating=min_rating,
+        is_online=is_online,
+        limit=limit,
+        offset=offset,
+    )
+    items: list[WorkerCatalogItem] = []
+    for user, profile in rows:
+        prof = db.get(Profession, profile.profession_id)
+        if prof is None:
+            continue
+        items.append(
+            WorkerCatalogItem(
+                id=profile.id,
+                user_id=profile.user_id,
+                first_name=user.first_name,
+                last_name=user.last_name,
+                photo_url=user.photo_url,
+                profession=ProfessionOut.model_validate(prof),
+                about=profile.about,
+                max_distance_km=profile.max_distance_km,
+                rating_avg=profile.rating_avg,
+                reviews_count=profile.reviews_count,
+                completed_orders=profile.completed_orders,
+                is_online=profile.is_online,
+            )
+        )
+    return WorkerCatalogOut(items=items, total=total, limit=limit, offset=offset)
 
 
 def _has_location_for_dispatch(user: User, profile: WorkerProfile | None) -> bool:

@@ -1,7 +1,7 @@
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from models.order import Order
@@ -94,6 +94,36 @@ def find_nearest_available_worker(
     candidates.sort(key=lambda x: x[2])
     user, profile, dist = candidates[0]
     return user, profile, dist
+
+
+def list_workers_catalog(
+    db: Session,
+    *,
+    profession_id: int | None,
+    min_rating: Decimal | None,
+    is_online: bool | None,
+    limit: int,
+    offset: int,
+) -> tuple[list[tuple[User, WorkerProfile]], int]:
+    q = (
+        select(User, WorkerProfile)
+        .join(WorkerProfile, WorkerProfile.user_id == User.id)
+        .where(User.role == UserRole.worker.value)
+    )
+    if profession_id is not None:
+        q = q.where(WorkerProfile.profession_id == profession_id)
+    if min_rating is not None:
+        q = q.where(WorkerProfile.rating_avg >= min_rating)
+    if is_online is not None:
+        q = q.where(WorkerProfile.is_online.is_(is_online))
+
+    total: int = db.execute(select(func.count()).select_from(q.subquery())).scalar_one()
+
+    q = q.order_by(WorkerProfile.rating_avg.desc(), WorkerProfile.completed_orders.desc())
+    q = q.offset(offset).limit(limit)
+
+    rows = list(db.execute(q).all())
+    return rows, total
 
 
 def get_worker_profile_by_user_id(db: Session, user_id: uuid.UUID) -> WorkerProfile | None:

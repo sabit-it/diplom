@@ -7,6 +7,28 @@ from pydantic import BaseModel, ConfigDict, Field
 from schemas.profession import ProfessionOut
 
 
+class WorkerCatalogItem(BaseModel):
+    id: UUID
+    user_id: UUID
+    first_name: str
+    last_name: str
+    photo_url: str | None
+    profession: ProfessionOut
+    about: str | None
+    max_distance_km: int | None
+    rating_avg: Decimal
+    reviews_count: int
+    completed_orders: int
+    is_online: bool
+
+
+class WorkerCatalogOut(BaseModel):
+    items: list[WorkerCatalogItem]
+    total: int
+    limit: int
+    offset: int
+
+
 class WorkerProfileUpsert(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={

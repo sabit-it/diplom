@@ -1,17 +1,53 @@
-from fastapi import APIRouter, Depends, status
+from decimal import Decimal
+
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from core.database import get_db
 from core.dependencies import get_current_active_user
 from models.user import User
-from schemas.worker import WorkerLinePatch, WorkerProfileOut, WorkerProfileUpsert
+from schemas.worker import WorkerCatalogOut, WorkerLinePatch, WorkerProfileOut, WorkerProfileUpsert
 from services.worker_service import (
     get_my_worker_profile,
+    list_workers,
     set_worker_line_status,
     upsert_my_worker_profile,
 )
 
 router = APIRouter(prefix="/workers", tags=["Исполнители"])
+
+
+@router.get(
+    "/",
+    response_model=WorkerCatalogOut,
+    summary="Каталог исполнителей",
+    description=(
+        "Возвращает список исполнителей с профилями. Доступен всем авторизованным пользователям. "
+        "Фильтры: `profession_id` — только с данной профессией; "
+        "`min_rating` — минимальный средний рейтинг (0–5); "
+        "`is_online` — только онлайн (`true`) или только офлайн (`false`). "
+        "Сортировка: по рейтингу убывает, затем по числу выполненных заказов. "
+        "Пагинация через `limit` (макс. 100) и `offset`."
+    ),
+)
+def get_workers_catalog(
+    profession_id: int | None = Query(default=None, description="Фильтр по профессии."),
+    min_rating: float | None = Query(default=None, ge=0, le=5, description="Минимальный рейтинг (0–5)."),
+    is_online: bool | None = Query(default=None, description="true — только онлайн, false — только офлайн."),
+    limit: int = Query(default=20, ge=1, le=100, description="Кол-во записей на странице."),
+    offset: int = Query(default=0, ge=0, description="Смещение от начала списка."),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_active_user),
+) -> WorkerCatalogOut:
+    min_rating_dec = Decimal(str(min_rating)) if min_rating is not None else None
+    return list_workers(
+        db,
+        profession_id=profession_id,
+        min_rating=min_rating_dec,
+        is_online=is_online,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get(

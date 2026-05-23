@@ -12,6 +12,7 @@ async def lifespan(_app: FastAPI):
     start_expiry_thread()
     yield
 from api.auth import router as auth_router
+from api.employers import router as employers_router
 from api.messages import router as messages_router
 from api.offers import router as offers_router
 from api.orders import router as orders_router
@@ -118,10 +119,19 @@ OPENAPI_TAGS = [
     {
         "name": "Исполнители",
         "description": (
+            "Каталог исполнителей `GET /workers/` с фильтрами (профессия, рейтинг, онлайн) и пагинацией. "
             "Профиль исполнителя: профессия из справочника, описание `about`, "
             "ограничение расстояния `max_distance_km` (1–500 км; `null` — без ограничений, "
             "dispatch не предложит заказ дальше этого радиуса). "
             "Переключатель «на линии» `PATCH /workers/me/line` — готов принимать заказы по гео или нет."
+        ),
+    },
+    {
+        "name": "Заказчики",
+        "description": (
+            "Профиль заказчика: название компании/ИП (`company_name`) и адрес (`address`). "
+            "`GET /employers/me` — получить профиль (404, если ещё не создан). "
+            "`PUT /employers/me` — создать или обновить; оба поля необязательны."
         ),
     },
 ]
@@ -151,6 +161,7 @@ app.include_router(messages_router)
 app.include_router(professions_router)
 app.include_router(reviews_router)
 app.include_router(workers_router)
+app.include_router(employers_router)
 
 
 @app.get(
