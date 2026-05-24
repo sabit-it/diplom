@@ -13,6 +13,7 @@ async def lifespan(_app: FastAPI):
     yield
 from api.auth import router as auth_router
 from api.employers import router as employers_router
+from api.transactions import router as transactions_router
 from api.messages import router as messages_router
 from api.offers import router as offers_router
 from api.orders import router as orders_router
@@ -127,6 +128,15 @@ OPENAPI_TAGS = [
         ),
     },
     {
+        "name": "Транзакции",
+        "description": (
+            "Внутренний учёт финансов. При завершении заказа (`PATCH .../complete`) автоматически создаётся "
+            "транзакция: с баланса заказчика списывается полная сумма заказа, "
+            "исполнителю начисляется сумма за вычетом комиссии платформы. "
+            "`GET /transactions/my` — история операций (новые первые)."
+        ),
+    },
+    {
         "name": "Заказчики",
         "description": (
             "Профиль заказчика: название компании/ИП (`company_name`) и адрес (`address`). "
@@ -162,6 +172,7 @@ app.include_router(professions_router)
 app.include_router(reviews_router)
 app.include_router(workers_router)
 app.include_router(employers_router)
+app.include_router(transactions_router)
 
 
 @app.get(

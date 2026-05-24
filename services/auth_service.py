@@ -1,30 +1,56 @@
+import uuid
+
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from core.security import (
+    TokenValidationError,
     access_token_ttl_seconds,
     create_access_token,
+    create_refresh_token,
+    decode_refresh_token,
     get_password_hash,
+    refresh_token_ttl_seconds,
     verify_password,
 )
-from models.user import User
 from models.user import User
 from repositories.user_repository import (
     create_user,
     get_user_by_email,
+    get_user_by_id,
     get_user_by_phone,
     update_user_email,
     update_user_password,
     update_user_profile,
 )
-from schemas.auth import EmailChangeRequest, PasswordChangeRequest, TokenResponse, UserProfileUpdate, UserPublic
+from schemas.auth import EmailChangeRequest, PasswordChangeRequest, RefreshRequest, TokenResponse, UserProfileUpdate, UserPublic
 
 
 def _build_token_response(user: User) -> TokenResponse:
     return TokenResponse(
         access_token=create_access_token(str(user.id)),
+        refresh_token=create_refresh_token(str(user.id)),
         expires_in=access_token_ttl_seconds(),
+        refresh_expires_in=refresh_token_ttl_seconds(),
     )
+
+
+def refresh_tokens(db: Session, payload: RefreshRequest) -> TokenResponse:
+    try:
+        user_id = decode_refresh_token(payload.refresh_token)
+    except TokenValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(exc),
+        ) from exc
+
+    user = get_user_by_id(db, uuid.UUID(user_id))
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found or inactive",
+        )
+    return _build_token_response(user)
 
 
 def register_user(

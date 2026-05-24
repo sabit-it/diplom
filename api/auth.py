@@ -10,13 +10,14 @@ from schemas.auth import (
     EmailChangeRequest,
     LoginRequest,
     PasswordChangeRequest,
+    RefreshRequest,
     RegisterRequest,
     TokenResponse,
     UserLocationUpdate,
     UserProfileUpdate,
     UserPublic,
 )
-from services.auth_service import change_email, change_password, login_user, register_user, update_profile
+from services.auth_service import change_email, change_password, login_user, refresh_tokens, register_user, update_profile
 
 router = APIRouter(prefix="/auth", tags=["Авторизация"])
 
@@ -56,6 +57,20 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> TokenRe
 )
 def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
     return login_user(db, payload.email, payload.password)
+
+
+@router.post(
+    "/refresh",
+    response_model=TokenResponse,
+    summary="Обновить токены",
+    description=(
+        "Принимает `refresh_token` (TTL 30 дней). Возвращает новую пару `access_token` + `refresh_token`. "
+        "Используйте, когда `access_token` истёк. Старый `refresh_token` после этого больше не действует "
+        "(rotating refresh tokens)."
+    ),
+)
+def refresh(payload: RefreshRequest, db: Session = Depends(get_db)) -> TokenResponse:
+    return refresh_tokens(db, payload)
 
 
 @router.post(

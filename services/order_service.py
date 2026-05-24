@@ -36,6 +36,7 @@ from schemas.order import (
     WorkerLocationOut,
 )
 from utils.enums import OfferStatus, OrderStatus, UserRole
+from services.payment_service import settle_order
 from services.email_service import (
     notify_employer_worker_accepted,
     notify_employer_worker_declined,
@@ -354,6 +355,8 @@ def complete_order(db: Session, user: User, order_id: uuid.UUID) -> OrderSummary
     if wp is not None:
         wp.completed_orders = int(wp.completed_orders) + 1
         db.add(wp)
+
+    settle_order(db, order)
 
     db.commit()
     db.refresh(order)

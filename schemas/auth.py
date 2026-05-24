@@ -104,8 +104,10 @@ class TokenResponse(BaseModel):
         json_schema_extra={
             "example": {
                 "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
                 "token_type": "bearer",
                 "expires_in": 3600,
+                "refresh_expires_in": 2592000,
             },
         },
     )
@@ -114,14 +116,30 @@ class TokenResponse(BaseModel):
         ...,
         description="JWT (HS256). В заголовке запросов: `Authorization: Bearer <access_token>`.",
     )
+    refresh_token: str = Field(
+        ...,
+        description="Токен для обновления access_token через `POST /auth/refresh`. TTL 30 дней.",
+    )
     token_type: str = Field(
         default="bearer",
         description="Тип токена для OAuth2; всегда `bearer`.",
     )
     expires_in: int = Field(
         ...,
-        description="Время жизни access_token в секундах (из настроек `ACCESS_TOKEN_EXPIRE_MINUTES`).",
+        description="Время жизни access_token в секундах.",
     )
+    refresh_expires_in: int = Field(
+        ...,
+        description="Время жизни refresh_token в секундах.",
+    )
+
+
+class RefreshRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."}},
+    )
+
+    refresh_token: str = Field(..., description="Refresh-токен, полученный при входе или предыдущем обновлении.")
 
 
 class UserProfileUpdate(BaseModel):
@@ -232,6 +250,7 @@ class UserPublic(BaseModel):
         None,
         description="Метка времени последнего обновления координат (UTC) или null.",
     )
+    balance: Decimal = Field(..., description="Текущий баланс (внутренний учёт). Employer — долг/аванс, Worker — заработок.")
     is_active: bool = Field(..., description="Активен ли аккаунт (заблокированные — false).")
     created_at: datetime = Field(..., description="Время создания записи.")
     updated_at: datetime = Field(..., description="Время последнего обновления записи.")

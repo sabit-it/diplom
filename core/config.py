@@ -9,6 +9,9 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     CORS_ORIGINS: list[str] = ["*"]
 
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+    PLATFORM_COMMISSION_PERCENT: float = 10.0
+
     SMTP_HOST: str = "smtp.gmail.com"
     SMTP_PORT: int = 587
     SMTP_USER: str = ""

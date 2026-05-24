@@ -30,6 +30,8 @@ class User(Base):
     lng: Mapped[Decimal | None] = mapped_column(Numeric(9, 6), nullable=True)
     location_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    balance: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=False)
+
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
