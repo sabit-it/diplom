@@ -20,6 +20,7 @@ class WorkerCatalogItem(BaseModel):
     reviews_count: int
     completed_orders: int
     is_online: bool
+    distance_meters: int | None = None
 
 
 class WorkerCatalogOut(BaseModel):

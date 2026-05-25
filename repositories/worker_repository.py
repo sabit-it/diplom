@@ -96,15 +96,12 @@ def find_nearest_available_worker(
     return user, profile, dist
 
 
-def list_workers_catalog(
-    db: Session,
+def _base_catalog_query(
     *,
     profession_id: int | None,
     min_rating: Decimal | None,
     is_online: bool | None,
-    limit: int,
-    offset: int,
-) -> tuple[list[tuple[User, WorkerProfile]], int]:
+):
     q = (
         select(User, WorkerProfile)
         .join(WorkerProfile, WorkerProfile.user_id == User.id)
@@ -116,14 +113,44 @@ def list_workers_catalog(
         q = q.where(WorkerProfile.rating_avg >= min_rating)
     if is_online is not None:
         q = q.where(WorkerProfile.is_online.is_(is_online))
+    return q
 
+
+def list_workers_catalog(
+    db: Session,
+    *,
+    profession_id: int | None,
+    min_rating: Decimal | None,
+    is_online: bool | None,
+    limit: int,
+    offset: int,
+) -> tuple[list[tuple[User, WorkerProfile]], int]:
+    q = _base_catalog_query(
+        profession_id=profession_id,
+        min_rating=min_rating,
+        is_online=is_online,
+    )
     total: int = db.execute(select(func.count()).select_from(q.subquery())).scalar_one()
-
     q = q.order_by(WorkerProfile.rating_avg.desc(), WorkerProfile.completed_orders.desc())
     q = q.offset(offset).limit(limit)
-
     rows = list(db.execute(q).all())
     return rows, total
+
+
+def list_all_workers_for_geo(
+    db: Session,
+    *,
+    profession_id: int | None,
+    min_rating: Decimal | None,
+    is_online: bool | None,
+) -> list[tuple[User, WorkerProfile]]:
+    """Возвращает всех подходящих исполнителей без пагинации — для сортировки по расстоянию в Python."""
+    q = _base_catalog_query(
+        profession_id=profession_id,
+        min_rating=min_rating,
+        is_online=is_online,
+    )
+    return list(db.execute(q).all())
 
 
 def get_worker_profile_by_user_id(db: Session, user_id: uuid.UUID) -> WorkerProfile | None:

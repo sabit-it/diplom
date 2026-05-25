@@ -49,14 +49,16 @@ def make_worker_profile(
     *,
     rating_avg: Decimal = Decimal("0.00"),
     is_online: bool = True,
+    lat: str = "55.751244",
+    lng: str = "37.618423",
 ) -> WorkerProfile:
     wp = WorkerProfile(
         user_id=user_id,
         profession_id=profession_id,
         is_online=is_online,
         rating_avg=rating_avg,
-        current_lat=Decimal("55.751244"),
-        current_lng=Decimal("37.618423"),
+        current_lat=Decimal(lat),
+        current_lng=Decimal(lng),
     )
     db.add(wp)
     db.commit()
@@ -215,3 +217,131 @@ class TestWorkersCatalog:
         resp = client.get("/workers/", params={"profession_id": profession}, headers=bearer(emp_token))
         ratings = [float(i["rating_avg"]) for i in resp.json()["items"]]
         assert ratings == sorted(ratings, reverse=True)
+
+
+class TestWorkersCatalogGeo:
+    """Тесты режима гео-поиска: GET /workers/?lat=...&lng=..."""
+
+    # Центр поиска — Москва, Красная площадь
+    SEARCH_LAT = "55.7539"
+    SEARCH_LNG = "37.6208"
+
+    # ~500 м от центра
+    NEAR_LAT = "55.7500"
+    NEAR_LNG = "37.6208"
+
+    # ~50 км от центра (Солнечногорск)
+    FAR_LAT = "56.1852"
+    FAR_LNG = "36.9877"
+
+    def test_geo_returns_distance_meters(self, client, db, profession):
+        _, emp_token = _register(client, "employer")
+        _, wrk_token = _register(client, "worker")
+        make_worker_profile(db, get_user_id(client, wrk_token), profession,
+                            lat=self.NEAR_LAT, lng=self.NEAR_LNG)
+
+        resp = client.get("/workers/", params={
+            "lat": self.SEARCH_LAT, "lng": self.SEARCH_LNG,
+            "profession_id": profession,
+        }, headers=bearer(emp_token))
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert len(items) >= 1
+        assert items[0]["distance_meters"] is not None
+        assert items[0]["distance_meters"] > 0
+
+    def test_geo_sorted_nearest_first(self, client, db, profession):
+        _, emp_token = _register(client, "employer")
+
+        _, near_token = _register(client, "worker")
+        _, far_token = _register(client, "worker")
+        make_worker_profile(db, get_user_id(client, near_token), profession,
+                            lat=self.NEAR_LAT, lng=self.NEAR_LNG)
+        make_worker_profile(db, get_user_id(client, far_token), profession,
+                            lat=self.FAR_LAT, lng=self.FAR_LNG)
+
+        resp = client.get("/workers/", params={
+            "lat": self.SEARCH_LAT, "lng": self.SEARCH_LNG,
+            "profession_id": profession,
+        }, headers=bearer(emp_token))
+        items = resp.json()["items"]
+        near_id = str(get_user_id(client, near_token))
+        far_id = str(get_user_id(client, far_token))
+
+        user_ids = [i["user_id"] for i in items]
+        assert user_ids.index(near_id) < user_ids.index(far_id)
+
+    def test_geo_distances_ascending(self, client, db, profession):
+        _, emp_token = _register(client, "employer")
+        for lat in [self.NEAR_LAT, self.FAR_LAT]:
+            _, wrk_token = _register(client, "worker")
+            make_worker_profile(db, get_user_id(client, wrk_token), profession,
+                                lat=lat, lng=self.SEARCH_LNG)
+
+        resp = client.get("/workers/", params={
+            "lat": self.SEARCH_LAT, "lng": self.SEARCH_LNG,
+            "profession_id": profession,
+        }, headers=bearer(emp_token))
+        distances = [i["distance_meters"] for i in resp.json()["items"]]
+        assert distances == sorted(distances)
+
+    def test_geo_max_distance_filters(self, client, db, profession):
+        _, emp_token = _register(client, "employer")
+
+        _, near_token = _register(client, "worker")
+        _, far_token = _register(client, "worker")
+        make_worker_profile(db, get_user_id(client, near_token), profession,
+                            lat=self.NEAR_LAT, lng=self.NEAR_LNG)
+        make_worker_profile(db, get_user_id(client, far_token), profession,
+                            lat=self.FAR_LAT, lng=self.FAR_LNG)
+
+        # Радиус 5 км — ближний попадает, дальний нет
+        resp = client.get("/workers/", params={
+            "lat": self.SEARCH_LAT, "lng": self.SEARCH_LNG,
+            "profession_id": profession,
+            "max_distance_km": 5,
+        }, headers=bearer(emp_token))
+        user_ids = [i["user_id"] for i in resp.json()["items"]]
+        near_id = str(get_user_id(client, near_token))
+        far_id = str(get_user_id(client, far_token))
+        assert near_id in user_ids
+        assert far_id not in user_ids
+
+    def test_geo_workers_without_coords_excluded(self, client, db, profession):
+        _, emp_token = _register(client, "employer")
+        _, wrk_token = _register(client, "worker")
+        # Профиль без координат
+        wp = WorkerProfile(
+            user_id=get_user_id(client, wrk_token),
+            profession_id=profession,
+            is_online=True,
+        )
+        db.add(wp)
+        db.commit()
+
+        resp = client.get("/workers/", params={
+            "lat": self.SEARCH_LAT, "lng": self.SEARCH_LNG,
+            "profession_id": profession,
+        }, headers=bearer(emp_token))
+        user_ids = [i["user_id"] for i in resp.json()["items"]]
+        assert str(get_user_id(client, wrk_token)) not in user_ids
+
+    def test_geo_only_lat_returns_422(self, client, db, profession):
+        _, emp_token = _register(client, "employer")
+        resp = client.get("/workers/", params={"lat": self.SEARCH_LAT}, headers=bearer(emp_token))
+        assert resp.status_code == 422
+
+    def test_geo_only_lng_returns_422(self, client, db, profession):
+        _, emp_token = _register(client, "employer")
+        resp = client.get("/workers/", params={"lng": self.SEARCH_LNG}, headers=bearer(emp_token))
+        assert resp.status_code == 422
+
+    def test_no_geo_distance_meters_is_none(self, client, db, profession):
+        _, emp_token = _register(client, "employer")
+        _, wrk_token = _register(client, "worker")
+        make_worker_profile(db, get_user_id(client, wrk_token), profession)
+
+        resp = client.get("/workers/", params={"profession_id": profession}, headers=bearer(emp_token))
+        items = resp.json()["items"]
+        assert len(items) >= 1
+        assert items[0]["distance_meters"] is None

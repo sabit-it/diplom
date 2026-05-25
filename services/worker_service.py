@@ -9,9 +9,11 @@ from models.worker_profile import WorkerProfile
 from repositories.profession_repository import require_active_profession
 from repositories.worker_repository import (
     get_worker_profile_by_user_id,
+    list_all_workers_for_geo,
     list_workers_catalog,
     persist_worker_profile,
 )
+from utils.geo import haversine_meters
 from schemas.profession import ProfessionOut
 from schemas.worker import (
     WorkerCatalogItem,
@@ -23,6 +25,40 @@ from schemas.worker import (
 from utils.enums import UserRole
 
 
+def _resolve_worker_coords(user: User, profile: WorkerProfile) -> tuple[Decimal, Decimal] | None:
+    if profile.current_lat is not None and profile.current_lng is not None:
+        return profile.current_lat, profile.current_lng
+    if user.lat is not None and user.lng is not None:
+        return user.lat, user.lng
+    return None
+
+
+def _build_catalog_item(
+    db: Session,
+    user: User,
+    profile: WorkerProfile,
+    distance_meters: int | None = None,
+) -> WorkerCatalogItem | None:
+    prof = db.get(Profession, profile.profession_id)
+    if prof is None:
+        return None
+    return WorkerCatalogItem(
+        id=profile.id,
+        user_id=profile.user_id,
+        first_name=user.first_name,
+        last_name=user.last_name,
+        photo_url=user.photo_url,
+        profession=ProfessionOut.model_validate(prof),
+        about=profile.about,
+        max_distance_km=profile.max_distance_km,
+        rating_avg=profile.rating_avg,
+        reviews_count=profile.reviews_count,
+        completed_orders=profile.completed_orders,
+        is_online=profile.is_online,
+        distance_meters=distance_meters,
+    )
+
+
 def list_workers(
     db: Session,
     *,
@@ -31,7 +67,23 @@ def list_workers(
     is_online: bool | None,
     limit: int,
     offset: int,
+    lat: Decimal | None = None,
+    lng: Decimal | None = None,
+    max_distance_km: int | None = None,
 ) -> WorkerCatalogOut:
+    if lat is not None and lng is not None:
+        return _list_workers_by_geo(
+            db,
+            profession_id=profession_id,
+            min_rating=min_rating,
+            is_online=is_online,
+            limit=limit,
+            offset=offset,
+            lat=lat,
+            lng=lng,
+            max_distance_km=max_distance_km,
+        )
+
     rows, total = list_workers_catalog(
         db,
         profession_id=profession_id,
@@ -42,25 +94,53 @@ def list_workers(
     )
     items: list[WorkerCatalogItem] = []
     for user, profile in rows:
-        prof = db.get(Profession, profile.profession_id)
-        if prof is None:
+        item = _build_catalog_item(db, user, profile)
+        if item is not None:
+            items.append(item)
+    return WorkerCatalogOut(items=items, total=total, limit=limit, offset=offset)
+
+
+def _list_workers_by_geo(
+    db: Session,
+    *,
+    profession_id: int | None,
+    min_rating: Decimal | None,
+    is_online: bool | None,
+    limit: int,
+    offset: int,
+    lat: Decimal,
+    lng: Decimal,
+    max_distance_km: int | None,
+) -> WorkerCatalogOut:
+    all_rows = list_all_workers_for_geo(
+        db,
+        profession_id=profession_id,
+        min_rating=min_rating,
+        is_online=is_online,
+    )
+
+    # Вычисляем расстояние для каждого и фильтруем тех, у кого нет координат.
+    with_dist: list[tuple[User, WorkerProfile, int]] = []
+    for user, profile in all_rows:
+        coords = _resolve_worker_coords(user, profile)
+        if coords is None:
             continue
-        items.append(
-            WorkerCatalogItem(
-                id=profile.id,
-                user_id=profile.user_id,
-                first_name=user.first_name,
-                last_name=user.last_name,
-                photo_url=user.photo_url,
-                profession=ProfessionOut.model_validate(prof),
-                about=profile.about,
-                max_distance_km=profile.max_distance_km,
-                rating_avg=profile.rating_avg,
-                reviews_count=profile.reviews_count,
-                completed_orders=profile.completed_orders,
-                is_online=profile.is_online,
-            )
-        )
+        dist_m = int(haversine_meters(lat, lng, coords[0], coords[1]))
+        if max_distance_km is not None and dist_m > max_distance_km * 1000:
+            continue
+        with_dist.append((user, profile, dist_m))
+
+    # Сортируем: ближайшие первыми.
+    with_dist.sort(key=lambda x: x[2])
+
+    total = len(with_dist)
+    page = with_dist[offset: offset + limit]
+
+    items: list[WorkerCatalogItem] = []
+    for user, profile, dist_m in page:
+        item = _build_catalog_item(db, user, profile, distance_meters=dist_m)
+        if item is not None:
+            items.append(item)
     return WorkerCatalogOut(items=items, total=total, limit=limit, offset=offset)
 
 
