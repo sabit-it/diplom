@@ -10,11 +10,12 @@ from models.transaction import Transaction
 def create_transaction(
     db: Session,
     *,
-    order_id: uuid.UUID,
+    order_id: uuid.UUID | None,
     payer_id: uuid.UUID,
     receiver_id: uuid.UUID,
     amount: Decimal,
     commission_amount: Decimal,
+    tx_type: str = "order_settlement",
 ) -> Transaction:
     tx = Transaction(
         order_id=order_id,
@@ -22,6 +23,7 @@ def create_transaction(
         receiver_id=receiver_id,
         amount=amount,
         commission_amount=commission_amount,
+        type=tx_type,
         status="completed",
     )
     db.add(tx)

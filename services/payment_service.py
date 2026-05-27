@@ -1,13 +1,15 @@
 from decimal import Decimal, ROUND_HALF_UP
 import uuid
 
+from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from core.config import settings
 from models.order import Order
 from models.user import User
 from repositories.transaction_repository import create_transaction, list_transactions_for_user
-from schemas.transaction import TransactionListOut, TransactionOut
+from schemas.transaction import DepositOut, TransactionListOut, TransactionOut
+from utils.enums import UserRole
 
 
 def _commission_percent() -> Decimal:
@@ -44,6 +46,38 @@ def settle_order(db: Session, order: Order) -> None:
         receiver_id=order.assigned_worker_id,
         amount=total,
         commission_amount=commission,
+        tx_type="order_settlement",
+    )
+
+
+def deposit_balance(db: Session, user: User, amount: Decimal) -> DepositOut:
+    if user.role != UserRole.employer.value:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Пополнение баланса доступно только заказчикам.",
+        )
+
+    user.balance = user.balance + amount
+    db.add(user)
+
+    tx = create_transaction(
+        db,
+        order_id=None,
+        payer_id=user.id,
+        receiver_id=user.id,
+        amount=amount,
+        commission_amount=Decimal("0.00"),
+        tx_type="deposit",
+    )
+
+    db.commit()
+    db.refresh(user)
+    db.refresh(tx)
+
+    return DepositOut(
+        transaction_id=tx.id,
+        amount=amount,
+        new_balance=user.balance,
     )
 
 
