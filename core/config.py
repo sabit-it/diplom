@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
     PLATFORM_COMMISSION_PERCENT: float = 10.0
 
-    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_HOST: str = "smtp.yandex.ru"
     SMTP_PORT: int = 587
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""

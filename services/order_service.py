@@ -90,6 +90,12 @@ def create_order_with_dispatch(
 ) -> OrderCreateResult:
     require_active_profession(db, payload.profession_id)
 
+    if employer.balance < 0:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Создание заказа недоступно при отрицательном балансе. Пополните баланс.",
+        )
+
     total = payload.total_price
     order = create_order(
         db,
@@ -107,7 +113,6 @@ def create_order_with_dispatch(
         status=OrderStatus.pending_offer.value,
     )
 
-    # Первый раз никого не исключаем — заказ только создан, офферов ещё нет.
     exclude: set[uuid.UUID] = set()
     nearest = find_nearest_available_worker(
         db,
@@ -118,8 +123,6 @@ def create_order_with_dispatch(
     )
 
     if nearest is None:
-        # Онлайн-работников с нужной профессией и координатами нет совсем.
-        # Сохраняем заказ как «нет кандидатов» и уведомляем заказчика.
         order.status = OrderStatus.no_workers_available.value
         save_order(db, order)
         notify_no_workers(employer.email, order.title)
@@ -145,8 +148,6 @@ def create_order_with_dispatch(
 
 
 def _dispatch_next_after_decline(db: Session, order: Order) -> uuid.UUID | None:
-    # Исключаем всех, кто уже получал оффер по этому заказу (declined/expired),
-    # чтобы не слать предложение одному и тому же работнику дважды.
     exclude = worker_ids_with_offers_for_order(db, order.id)
     nearest = find_nearest_available_worker(
         db,
@@ -156,7 +157,6 @@ def _dispatch_next_after_decline(db: Session, order: Order) -> uuid.UUID | None:
         exclude_worker_ids=exclude,
     )
     if nearest is None:
-        # Все доступные кандидаты уже отказали — заказ уходит в «нет исполнителей».
         order.status = OrderStatus.no_workers_available.value
         save_order(db, order)
         return None
@@ -208,9 +208,6 @@ def respond_to_offer(
     employer = db.get(User, order.employer_id)
 
     if accept:
-        # Защита от гонки: теоретически воркер мог принять другой заказ
-        # между моментом отправки оффера и нажатием «принять» здесь.
-        # Без этой проверки один работник мог бы оказаться на двух заказах одновременно.
         existing = db.execute(
             select(Order).where(
                 Order.assigned_worker_id == worker.id,
@@ -400,7 +397,6 @@ def cancel_order(db: Session, employer: User, order_id: uuid.UUID) -> OrderSumma
     db.commit()
     db.refresh(order)
 
-    # Уведомляем работника, если заказ был уже принят им.
     if was_assigned and worker_id is not None:
         worker_user = db.get(User, worker_id)
         if worker_user:
@@ -431,7 +427,6 @@ def repeat_order(db: Session, employer: User, order_id: uuid.UUID) -> OrderCreat
     if original.employer_id != employer.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
-    # Копируем параметры из оригинала, сбрасываем scheduled_at — заказ немедленный.
     payload = OrderCreate(
         profession_id=original.profession_id,
         title=original.title,

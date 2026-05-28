@@ -36,10 +36,13 @@ def list_transactions_for_user(
     *,
     limit: int,
     offset: int,
+    tx_type: str | None = None,
 ) -> tuple[list[Transaction], int]:
     q = select(Transaction).where(
         or_(Transaction.payer_id == user_id, Transaction.receiver_id == user_id)
     )
+    if tx_type is not None:
+        q = q.where(Transaction.type == tx_type)
     total: int = db.execute(select(func.count()).select_from(q.subquery())).scalar_one()
     rows = list(
         db.execute(
@@ -47,3 +50,26 @@ def list_transactions_for_user(
         ).scalars()
     )
     return rows, total
+
+
+def summarize_transactions_for_user(
+    db: Session,
+    user_id: uuid.UUID,
+) -> dict[str, Decimal]:
+    base = select(Transaction).where(
+        or_(Transaction.payer_id == user_id, Transaction.receiver_id == user_id)
+    )
+
+    def _sum(tx_type: str, as_receiver: bool = False) -> Decimal:
+        q = base.where(Transaction.type == tx_type)
+        if as_receiver:
+            q = q.where(Transaction.receiver_id == user_id, Transaction.payer_id != user_id)
+        col = select(func.coalesce(func.sum(Transaction.amount), 0)).select_from(q.subquery())
+        return Decimal(str(db.execute(col).scalar_one()))
+
+    return {
+        "total_deposited": _sum("deposit"),
+        "total_withdrawn": _sum("withdrawal"),
+        "total_earned": _sum("order_settlement", as_receiver=True),
+        "total_spent": _sum("order_settlement"),
+    }

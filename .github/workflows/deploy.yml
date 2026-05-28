@@ -7,7 +7,6 @@ on:
     branches: [main]
 
 jobs:
-  # Тесты гоняются на серверах GitHub — там есть postgres как сервис
   test:
     runs-on: ubuntu-latest
 
@@ -56,16 +55,26 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Write .env.docker
-        shell: powershell
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          CORS_ORIGINS: ${{ secrets.CORS_ORIGINS }}
+          SMTP_HOST: smtp.yandex.ru
+          SMTP_PORT: "587"
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
         run: |
-          Set-Content  -Path .env.docker -Value 'DATABASE_URL=${{ secrets.DATABASE_URL }}'
-          Add-Content  -Path .env.docker -Value 'SECRET_KEY=${{ secrets.SECRET_KEY }}'
-          Add-Content  -Path .env.docker -Value 'CORS_ORIGINS=${{ secrets.CORS_ORIGINS }}'
-          Add-Content  -Path .env.docker -Value 'SMTP_USER=${{ secrets.SMTP_USER }}'
-          Add-Content  -Path .env.docker -Value 'SMTP_PASSWORD=${{ secrets.SMTP_PASSWORD }}'
+          cat > .env.docker <<EOF
+          DATABASE_URL=${DATABASE_URL}
+          SECRET_KEY=${SECRET_KEY}
+          CORS_ORIGINS=${CORS_ORIGINS}
+          SMTP_HOST=${SMTP_HOST}
+          SMTP_PORT=${SMTP_PORT}
+          SMTP_USER=${SMTP_USER}
+          SMTP_PASSWORD=${SMTP_PASSWORD}
+          EOF
 
       - name: Deploy
-        shell: powershell
         run: |
           docker compose up -d db
           docker compose up -d --build --no-deps app

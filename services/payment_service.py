@@ -7,8 +7,8 @@ from sqlalchemy.orm import Session
 from core.config import settings
 from models.order import Order
 from models.user import User
-from repositories.transaction_repository import create_transaction, list_transactions_for_user
-from schemas.transaction import DepositOut, TransactionListOut, TransactionOut
+from repositories.transaction_repository import create_transaction, list_transactions_for_user, summarize_transactions_for_user
+from schemas.transaction import DepositOut, TransactionListOut, TransactionOut, TransactionSummaryOut, WithdrawOut
 from utils.enums import UserRole
 
 
@@ -17,12 +17,6 @@ def _commission_percent() -> Decimal:
 
 
 def settle_order(db: Session, order: Order) -> None:
-    """Создаёт транзакцию и обновляет балансы при завершении заказа.
-
-    Employer balance уменьшается на полную сумму заказа.
-    Worker balance увеличивается на сумму за вычетом комиссии платформы.
-    Вызывать внутри той же транзакции БД, что и смена статуса заказа.
-    """
     employer = db.get(User, order.employer_id)
     worker = db.get(User, order.assigned_worker_id)
     if employer is None or worker is None:
@@ -81,13 +75,60 @@ def deposit_balance(db: Session, user: User, amount: Decimal) -> DepositOut:
     )
 
 
+def withdraw_balance(db: Session, user: User, amount: Decimal, card_number: str) -> WithdrawOut:
+    if user.role != UserRole.worker.value:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Вывод средств доступен только исполнителям.",
+        )
+
+    if user.balance < amount:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Недостаточно средств. Текущий баланс: {user.balance} ₽.",
+        )
+
+    user.balance = user.balance - amount
+    db.add(user)
+
+    tx = create_transaction(
+        db,
+        order_id=None,
+        payer_id=user.id,
+        receiver_id=user.id,
+        amount=amount,
+        commission_amount=Decimal("0.00"),
+        tx_type="withdrawal",
+    )
+
+    db.commit()
+    db.refresh(user)
+    db.refresh(tx)
+
+    return WithdrawOut(
+        transaction_id=tx.id,
+        amount=amount,
+        new_balance=user.balance,
+        card_last4=card_number[-4:],
+    )
+
+
 def list_my_transactions(
     db: Session,
     user: User,
     *,
     limit: int,
     offset: int,
+    tx_type: str | None = None,
 ) -> TransactionListOut:
-    rows, total = list_transactions_for_user(db, user.id, limit=limit, offset=offset)
+    rows, total = list_transactions_for_user(db, user.id, limit=limit, offset=offset, tx_type=tx_type)
     items = [TransactionOut.model_validate(t) for t in rows]
     return TransactionListOut(items=items, total=total, limit=limit, offset=offset)
+
+
+def get_my_summary(db: Session, user: User) -> TransactionSummaryOut:
+    totals = summarize_transactions_for_user(db, user.id)
+    return TransactionSummaryOut(
+        current_balance=user.balance,
+        **totals,
+    )
