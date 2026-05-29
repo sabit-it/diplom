@@ -44,7 +44,7 @@ def settle_order(db: Session, order: Order) -> None:
     )
 
 
-def deposit_balance(db: Session, user: User, amount: Decimal) -> DepositOut:
+def deposit_balance(db: Session, user: User, amount: Decimal, card_number: str) -> DepositOut:
     if user.role != UserRole.employer.value:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -72,6 +72,7 @@ def deposit_balance(db: Session, user: User, amount: Decimal) -> DepositOut:
         transaction_id=tx.id,
         amount=amount,
         new_balance=user.balance,
+        card_last4=card_number[-4:],
     )
 
 

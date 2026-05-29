@@ -27,7 +27,7 @@ def deposit(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_active_user),
 ) -> DepositOut:
-    return deposit_balance(db, user, payload.amount)
+    return deposit_balance(db, user, payload.amount, payload.card_number)
 
 
 @router.post(

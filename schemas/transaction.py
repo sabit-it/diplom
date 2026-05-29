@@ -33,7 +33,16 @@ class TransactionListOut(BaseModel):
 
 class DepositRequest(BaseModel):
     model_config = ConfigDict(
-        json_schema_extra={"example": {"amount": "1000.00"}},
+        json_schema_extra={
+            "example": {
+                "amount": "1000.00",
+                "card_number": "4111111111111111",
+                "card_holder": "IVAN IVANOV",
+                "expiry_month": 12,
+                "expiry_year": 2027,
+                "cvv": "123",
+            }
+        }
     )
 
     amount: Decimal = Field(
@@ -44,12 +53,25 @@ class DepositRequest(BaseModel):
         decimal_places=2,
         description="Сумма пополнения в рублях. Минимум 0.01, максимум 1 000 000.",
     )
+    card_number: str = Field(..., pattern=r"^\d{16,19}$", description="Номер карты, только цифры.")
+    card_holder: str = Field(..., min_length=2, max_length=100, description="Имя держателя карты латиницей.")
+    expiry_month: int = Field(..., ge=1, le=12, description="Месяц истечения карты (1–12).")
+    expiry_year: int = Field(..., ge=2024, le=2040, description="Год истечения карты.")
+    cvv: str = Field(..., pattern=r"^\d{3,4}$", description="CVV/CVC код.")
+
+    @model_validator(mode="after")
+    def check_not_expired(self) -> "DepositRequest":
+        today = date.today()
+        if (self.expiry_year, self.expiry_month) < (today.year, today.month):
+            raise ValueError("Срок действия карты истёк.")
+        return self
 
 
 class DepositOut(BaseModel):
     transaction_id: UUID = Field(..., description="Идентификатор созданной транзакции.")
     amount: Decimal = Field(..., description="Зачисленная сумма.")
     new_balance: Decimal = Field(..., description="Баланс после пополнения.")
+    card_last4: str = Field(..., description="Последние 4 цифры карты.")
 
 
 class WithdrawRequest(BaseModel):
