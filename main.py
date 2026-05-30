@@ -11,6 +11,7 @@ from services.offer_expiry import start_expiry_thread
 async def lifespan(_app: FastAPI):
     start_expiry_thread()
     yield
+from api.admin import router as admin_router
 from api.auth import router as auth_router
 from api.employers import router as employers_router
 from api.transactions import router as transactions_router
@@ -71,6 +72,18 @@ OPENAPI_DESCRIPTION = """
 """.strip()
 
 OPENAPI_TAGS = [
+    {
+        "name": "Админ",
+        "description": (
+            "Эндпоинты для административной панели. Доступны только пользователям с `is_admin=true`. "
+            "**Пользователи**: список, просмотр, блокировка/разблокировка, деактивация. "
+            "**Заказы**: все заказы с фильтрами по статусу и заказчику. "
+            "**Профессии**: создание, редактирование, деактивация справочника. "
+            "**Транзакции**: все операции платформы с фильтрами. "
+            "**Статистика**: общие показатели платформы (пользователи, заказы, выручка). "
+            "**Отзывы**: удаление нежелательных отзывов."
+        ),
+    },
     {
         "name": "Обзор",
         "description": "Служебная проверка доступности API.",
@@ -175,6 +188,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(admin_router)
 app.include_router(auth_router)
 app.include_router(orders_router)
 app.include_router(offers_router)

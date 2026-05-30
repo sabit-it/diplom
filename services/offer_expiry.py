@@ -127,7 +127,7 @@ def _process_one(offer_id: uuid.UUID) -> None:
 
 
 def _expire_due_offers() -> None:
-    cutoff = datetime.now(timezone.utc) - timedelta(seconds=_OFFER_TIMEOUT_SECONDS)
+    cutoff = datetime.utcnow() - timedelta(seconds=_OFFER_TIMEOUT_SECONDS)
 
     # Читаем только ID в отдельной сессии — так мы не держим открытую транзакцию
     # пока обрабатываем каждый оффер по очереди (каждый в своей сессии с SKIP LOCKED).

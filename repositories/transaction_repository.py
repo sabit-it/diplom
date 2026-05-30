@@ -60,16 +60,18 @@ def summarize_transactions_for_user(
         or_(Transaction.payer_id == user_id, Transaction.receiver_id == user_id)
     )
 
-    def _sum(tx_type: str, as_receiver: bool = False) -> Decimal:
+    def _sum(tx_type: str, as_receiver: bool = False, net: bool = False) -> Decimal:
         q = base.where(Transaction.type == tx_type)
         if as_receiver:
             q = q.where(Transaction.receiver_id == user_id, Transaction.payer_id != user_id)
-        col = select(func.coalesce(func.sum(Transaction.amount), 0)).select_from(q.subquery())
+        # net=True: worker receives amount - commission_amount (after platform fee)
+        expr = (Transaction.amount - Transaction.commission_amount) if net else Transaction.amount
+        col = select(func.coalesce(func.sum(expr), 0)).select_from(q.subquery())
         return Decimal(str(db.execute(col).scalar_one()))
 
     return {
         "total_deposited": _sum("deposit"),
         "total_withdrawn": _sum("withdrawal"),
-        "total_earned": _sum("order_settlement", as_receiver=True),
+        "total_earned": _sum("order_settlement", as_receiver=True, net=True),
         "total_spent": _sum("order_settlement"),
     }

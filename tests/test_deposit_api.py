@@ -26,6 +26,15 @@ def bearer(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
+CARD = {
+    "card_number": "4111111111111111",
+    "card_holder": "TEST USER",
+    "expiry_month": 12,
+    "expiry_year": 2027,
+    "cvv": "123",
+}
+
+
 def _register(client: TestClient, role: str) -> tuple[dict, str]:
     payload = {
         "email": unique_email(),
@@ -72,13 +81,13 @@ class TestDeposit:
     def test_returns_200(self, client):
         _, token = _register(client, "employer")
         resp = client.post("/transactions/deposit",
-                           json={"amount": "500.00"}, headers=bearer(token))
+                           json={"amount": "500.00", **CARD}, headers=bearer(token))
         assert resp.status_code == 200
 
     def test_response_has_required_fields(self, client):
         _, token = _register(client, "employer")
         resp = client.post("/transactions/deposit",
-                           json={"amount": "100.00"}, headers=bearer(token))
+                           json={"amount": "100.00", **CARD}, headers=bearer(token))
         body = resp.json()
         for field in ("transaction_id", "amount", "new_balance"):
             assert field in body, f"Missing field: {field}"
@@ -86,33 +95,33 @@ class TestDeposit:
     def test_amount_in_response_matches_request(self, client):
         _, token = _register(client, "employer")
         resp = client.post("/transactions/deposit",
-                           json={"amount": "750.50"}, headers=bearer(token))
+                           json={"amount": "750.50", **CARD}, headers=bearer(token))
         assert Decimal(resp.json()["amount"]) == Decimal("750.50")
 
     def test_new_balance_reflects_deposit(self, client):
         _, token = _register(client, "employer")
         client.post("/transactions/deposit",
-                    json={"amount": "300.00"}, headers=bearer(token))
+                    json={"amount": "300.00", **CARD}, headers=bearer(token))
         resp = client.post("/transactions/deposit",
-                           json={"amount": "200.00"}, headers=bearer(token))
+                           json={"amount": "200.00", **CARD}, headers=bearer(token))
         assert Decimal(resp.json()["new_balance"]) == Decimal("500.00")
 
     def test_balance_updated_in_profile(self, client):
         _, token = _register(client, "employer")
         client.post("/transactions/deposit",
-                    json={"amount": "1000.00"}, headers=bearer(token))
+                    json={"amount": "1000.00", **CARD}, headers=bearer(token))
         assert get_balance(client, token) == Decimal("1000.00")
 
     def test_multiple_deposits_accumulate(self, client):
         _, token = _register(client, "employer")
-        client.post("/transactions/deposit", json={"amount": "100.00"}, headers=bearer(token))
-        client.post("/transactions/deposit", json={"amount": "200.00"}, headers=bearer(token))
-        client.post("/transactions/deposit", json={"amount": "50.00"},  headers=bearer(token))
+        client.post("/transactions/deposit", json={"amount": "100.00", **CARD}, headers=bearer(token))
+        client.post("/transactions/deposit", json={"amount": "200.00", **CARD}, headers=bearer(token))
+        client.post("/transactions/deposit", json={"amount": "50.00", **CARD},  headers=bearer(token))
         assert get_balance(client, token) == Decimal("350.00")
 
     def test_transaction_appears_in_history(self, client):
         _, token = _register(client, "employer")
-        client.post("/transactions/deposit", json={"amount": "500.00"}, headers=bearer(token))
+        client.post("/transactions/deposit", json={"amount": "500.00", **CARD}, headers=bearer(token))
         txs = client.get("/transactions/my", headers=bearer(token)).json()
         assert txs["total"] >= 1
         deposit_txs = [t for t in txs["items"] if t["type"] == "deposit"]
@@ -120,21 +129,21 @@ class TestDeposit:
 
     def test_deposit_transaction_has_correct_type(self, client):
         _, token = _register(client, "employer")
-        client.post("/transactions/deposit", json={"amount": "100.00"}, headers=bearer(token))
+        client.post("/transactions/deposit", json={"amount": "100.00", **CARD}, headers=bearer(token))
         txs = client.get("/transactions/my", headers=bearer(token)).json()
         tx = next(t for t in txs["items"] if t["type"] == "deposit")
         assert tx["type"] == "deposit"
 
     def test_deposit_transaction_order_id_is_null(self, client):
         _, token = _register(client, "employer")
-        client.post("/transactions/deposit", json={"amount": "100.00"}, headers=bearer(token))
+        client.post("/transactions/deposit", json={"amount": "100.00", **CARD}, headers=bearer(token))
         txs = client.get("/transactions/my", headers=bearer(token)).json()
         tx = next(t for t in txs["items"] if t["type"] == "deposit")
         assert tx["order_id"] is None
 
     def test_deposit_commission_is_zero(self, client):
         _, token = _register(client, "employer")
-        client.post("/transactions/deposit", json={"amount": "100.00"}, headers=bearer(token))
+        client.post("/transactions/deposit", json={"amount": "100.00", **CARD}, headers=bearer(token))
         txs = client.get("/transactions/my", headers=bearer(token)).json()
         tx = next(t for t in txs["items"] if t["type"] == "deposit")
         assert Decimal(tx["commission_amount"]) == Decimal("0.00")
@@ -142,8 +151,14 @@ class TestDeposit:
     def test_transaction_id_is_valid_uuid(self, client):
         _, token = _register(client, "employer")
         resp = client.post("/transactions/deposit",
-                           json={"amount": "100.00"}, headers=bearer(token))
-        uuid.UUID(resp.json()["transaction_id"])  # не бросает — значит валидный
+                           json={"amount": "100.00", **CARD}, headers=bearer(token))
+        uuid.UUID(resp.json()["transaction_id"])
+
+    def test_response_has_card_last4(self, client):
+        _, token = _register(client, "employer")
+        resp = client.post("/transactions/deposit",
+                           json={"amount": "100.00", **CARD}, headers=bearer(token))
+        assert resp.json()["card_last4"] == "1111"
 
 
 # ---------------------------------------------------------------------------
@@ -155,36 +170,50 @@ class TestDepositValidation:
     def test_zero_amount_rejected(self, client):
         _, token = _register(client, "employer")
         resp = client.post("/transactions/deposit",
-                           json={"amount": "0.00"}, headers=bearer(token))
+                           json={"amount": "0.00", **CARD}, headers=bearer(token))
         assert resp.status_code == 422
 
     def test_negative_amount_rejected(self, client):
         _, token = _register(client, "employer")
         resp = client.post("/transactions/deposit",
-                           json={"amount": "-100.00"}, headers=bearer(token))
+                           json={"amount": "-100.00", **CARD}, headers=bearer(token))
         assert resp.status_code == 422
 
     def test_above_max_rejected(self, client):
         _, token = _register(client, "employer")
         resp = client.post("/transactions/deposit",
-                           json={"amount": "1000001.00"}, headers=bearer(token))
+                           json={"amount": "1000001.00", **CARD}, headers=bearer(token))
         assert resp.status_code == 422
 
     def test_max_amount_accepted(self, client):
         _, token = _register(client, "employer")
         resp = client.post("/transactions/deposit",
-                           json={"amount": "1000000.00"}, headers=bearer(token))
+                           json={"amount": "1000000.00", **CARD}, headers=bearer(token))
         assert resp.status_code == 200
 
     def test_min_amount_accepted(self, client):
         _, token = _register(client, "employer")
         resp = client.post("/transactions/deposit",
-                           json={"amount": "0.01"}, headers=bearer(token))
+                           json={"amount": "0.01", **CARD}, headers=bearer(token))
         assert resp.status_code == 200
 
     def test_missing_amount_rejected(self, client):
         _, token = _register(client, "employer")
         resp = client.post("/transactions/deposit", json={}, headers=bearer(token))
+        assert resp.status_code == 422
+
+    def test_expired_card_rejected(self, client):
+        _, token = _register(client, "employer")
+        resp = client.post("/transactions/deposit",
+                           json={"amount": "100.00", **{**CARD, "expiry_year": 2020}},
+                           headers=bearer(token))
+        assert resp.status_code == 422
+
+    def test_invalid_card_number_rejected(self, client):
+        _, token = _register(client, "employer")
+        resp = client.post("/transactions/deposit",
+                           json={"amount": "100.00", **{**CARD, "card_number": "1234"}},
+                           headers=bearer(token))
         assert resp.status_code == 422
 
 
@@ -197,11 +226,11 @@ class TestDepositAccess:
     def test_worker_forbidden(self, client):
         _, token = _register(client, "worker")
         resp = client.post("/transactions/deposit",
-                           json={"amount": "500.00"}, headers=bearer(token))
+                           json={"amount": "500.00", **CARD}, headers=bearer(token))
         assert resp.status_code == 403
 
     def test_unauthenticated_rejected(self, client):
-        resp = client.post("/transactions/deposit", json={"amount": "500.00"})
+        resp = client.post("/transactions/deposit", json={"amount": "500.00", **CARD})
         assert resp.status_code == 401
 
 
@@ -240,10 +269,8 @@ class TestDepositWithOrderHistory:
         db.add(wp)
         db.commit()
 
-        # Пополнение
-        client.post("/transactions/deposit", json={"amount": "2000.00"}, headers=bearer(emp_token))
+        client.post("/transactions/deposit", json={"amount": "2000.00", **CARD}, headers=bearer(emp_token))
 
-        # Создание и завершение заказа
         cr = client.post("/orders/", json={
             "profession_id": p.id,
             "title": "Тест депозит+заказ",
@@ -293,7 +320,6 @@ class TestDepositWithOrderHistory:
         db.add(wp)
         db.commit()
 
-        # Заказ на 1000 ₽ — баланс уйдёт в минус
         cr = client.post("/orders/", json={
             "profession_id": p.id,
             "title": "Тест минус",
@@ -311,9 +337,8 @@ class TestDepositWithOrderHistory:
         balance_after_order = get_balance(client, emp_token)
         assert balance_after_order < 0
 
-        # Депозит покрывает долг
         client.post("/transactions/deposit",
-                    json={"amount": "1500.00"}, headers=bearer(emp_token))
+                    json={"amount": "1500.00", **CARD}, headers=bearer(emp_token))
         balance_final = get_balance(client, emp_token)
         assert balance_final > 0
         assert balance_final == balance_after_order + Decimal("1500.00")

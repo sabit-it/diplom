@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from models.user import User
+from models.worker_profile import WorkerProfile
 
 _STATIONARY_COORD_EPS = Decimal("0.000045")
 _SKIP_IF_UNCHANGED_SECONDS = 12
@@ -133,6 +134,15 @@ def update_user_location(
     user.lat = lat
     user.lng = lng
     user.location_updated_at = now
+
+    profile = db.execute(
+        select(WorkerProfile).where(WorkerProfile.user_id == user.id)
+    ).scalar_one_or_none()
+    if profile is not None:
+        profile.current_lat = lat
+        profile.current_lng = lng
+        db.add(profile)
+
     db.commit()
     db.refresh(user)
     return user
