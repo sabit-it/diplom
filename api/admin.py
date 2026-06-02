@@ -24,6 +24,7 @@ from schemas.admin import (
     ProfessionUpdate,
 )
 from schemas.profession import ProfessionOut
+from schemas.review import ReviewOut
 
 router = APIRouter(prefix="/admin", tags=["Админ"])
 
@@ -161,6 +162,15 @@ def get_order(
 # Professions
 # ---------------------------------------------------------------------------
 
+@router.get("/professions", response_model=list[ProfessionOut], summary="Все профессии")
+def list_all_professions(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+) -> list[ProfessionOut]:
+    rows = db.execute(select(Profession).order_by(Profession.id)).scalars().all()
+    return [ProfessionOut.model_validate(r) for r in rows]
+
+
 @router.post(
     "/professions",
     response_model=ProfessionOut,
@@ -172,11 +182,15 @@ def create_profession(
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ) -> ProfessionOut:
-    existing = db.get(Profession, payload.id)
-    if existing is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Профессия с таким ID уже существует.")
+    if payload.id is not None:
+        if db.get(Profession, payload.id) is not None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Профессия с таким ID уже существует.")
+        next_id = payload.id
+    else:
+        max_id = db.execute(select(func.max(Profession.id))).scalar_one()
+        next_id = (max_id or 0) + 1
     profession = Profession(
-        id=payload.id,
+        id=next_id,
         name=payload.name,
         hourly_rate=payload.hourly_rate,
         rate_unit=payload.rate_unit.value,
@@ -300,6 +314,19 @@ def get_stats(
 # ---------------------------------------------------------------------------
 # Reviews
 # ---------------------------------------------------------------------------
+
+@router.get("/reviews", summary="Все отзывы")
+def list_all_reviews(
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+) -> dict:
+    q = select(Review).order_by(Review.created_at.desc())
+    total = db.execute(select(func.count()).select_from(q.subquery())).scalar_one()
+    rows = db.execute(q.offset(offset).limit(limit)).scalars().all()
+    return {"items": [ReviewOut.model_validate(r) for r in rows], "total": total}
+
 
 @router.delete(
     "/reviews/{review_id}",

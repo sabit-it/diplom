@@ -89,7 +89,7 @@ class AdminStatsOut(BaseModel):
 
 
 class ProfessionCreate(BaseModel):
-    id: int = Field(..., ge=1, le=32767, description="ID профессии (SmallInteger).")
+    id: int | None = Field(default=None, ge=1, le=32767, description="ID профессии (опционально, авто если не указан).")
     name: str = Field(..., min_length=1, max_length=100)
     hourly_rate: Decimal = Field(..., gt=0, max_digits=10, decimal_places=2)
     rate_unit: ProfessionRateUnit = Field(default=ProfessionRateUnit.hour)
