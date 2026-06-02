@@ -55,13 +55,9 @@ def _order_summary(order: Order) -> OrderSummary:
     return OrderSummary.model_validate(order)
 
 
-def _assigned_worker_payload(user: User, profile: WorkerProfile) -> AssignedWorkerOut:
-    if profile.current_lat is not None and profile.current_lng is not None:
-        loc = WorkerLocationOut(
-            lat=profile.current_lat,
-            lng=profile.current_lng,
-            source="worker_profile",
-        )
+def _assigned_worker_payload(user: User, profile: WorkerProfile | None) -> AssignedWorkerOut:
+    if profile is not None and profile.current_lat is not None and profile.current_lng is not None:
+        loc = WorkerLocationOut(lat=profile.current_lat, lng=profile.current_lng, source="worker_profile")
     elif user.lat is not None and user.lng is not None:
         loc = WorkerLocationOut(lat=user.lat, lng=user.lng, source="user")
     else:
@@ -76,9 +72,9 @@ def _assigned_worker_payload(user: User, profile: WorkerProfile) -> AssignedWork
         patronymic=user.patronymic,
         role=UserRole(user.role),
         photo_url=user.photo_url,
-        rating_avg=profile.rating_avg,
-        reviews_count=profile.reviews_count,
-        completed_orders=profile.completed_orders,
+        rating_avg=profile.rating_avg if profile else None,
+        reviews_count=profile.reviews_count if profile else 0,
+        completed_orders=profile.completed_orders if profile else 0,
         location=loc,
     )
 
@@ -288,8 +284,7 @@ def get_order_for_participant(
             wp = db.execute(
                 select(WorkerProfile).where(WorkerProfile.user_id == wu.id)
             ).scalar_one_or_none()
-            if wp is not None:
-                worker_out = _assigned_worker_payload(wu, wp)
+            worker_out = _assigned_worker_payload(wu, wp)
 
     return _order_summary(order), worker_out
 

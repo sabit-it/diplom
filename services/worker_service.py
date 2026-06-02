@@ -1,3 +1,4 @@
+import uuid
 from decimal import Decimal
 
 from fastapi import HTTPException, status
@@ -171,6 +172,19 @@ def _to_profile_out(db: Session, profile: WorkerProfile) -> WorkerProfileOut:
         current_lng=profile.current_lng,
         last_location_at=profile.last_location_at,
     )
+
+
+def get_public_worker_profile(db: Session, user_id: "uuid.UUID") -> WorkerCatalogItem:
+    wp = get_worker_profile_by_user_id(db, user_id)
+    if wp is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Профиль не найден")
+    wu = db.get(User, user_id)
+    if wu is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
+    item = _build_catalog_item(db, wu, wp)
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Профиль не найден")
+    return item
 
 
 def get_my_worker_profile(db: Session, user: User) -> WorkerProfileOut:

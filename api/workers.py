@@ -1,5 +1,7 @@
 from decimal import Decimal
 
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
@@ -9,6 +11,7 @@ from models.user import User
 from schemas.worker import WorkerCatalogOut, WorkerLinePatch, WorkerProfileOut, WorkerProfileUpsert
 from services.worker_service import (
     get_my_worker_profile,
+    get_public_worker_profile,
     list_workers,
     set_worker_line_status,
     upsert_my_worker_profile,
@@ -61,6 +64,19 @@ def get_workers_catalog(
         lng=lng_dec,
         max_distance_km=max_distance_km,
     )
+
+
+@router.get(
+    "/{user_id}",
+    response_model=WorkerCatalogItem,
+    summary="Профиль исполнителя по user_id",
+)
+def get_worker_by_user_id(
+    user_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_active_user),
+) -> WorkerCatalogItem:
+    return get_public_worker_profile(db, user_id)
 
 
 @router.get(
