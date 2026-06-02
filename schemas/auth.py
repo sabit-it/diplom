@@ -252,5 +252,6 @@ class UserPublic(BaseModel):
     )
     balance: Decimal = Field(..., description="Текущий баланс (внутренний учёт). Employer — долг/аванс, Worker — заработок.")
     is_active: bool = Field(..., description="Активен ли аккаунт (заблокированные — false).")
+    is_admin: bool = Field(default=False, description="Права администратора.")
     created_at: datetime = Field(..., description="Время создания записи.")
     updated_at: datetime = Field(..., description="Время последнего обновления записи.")
