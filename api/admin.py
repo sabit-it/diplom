@@ -263,12 +263,21 @@ def list_transactions(
         query = query.where(or_(Transaction.payer_id == user_id, Transaction.receiver_id == user_id))
     total = db.execute(select(func.count()).select_from(query.subquery())).scalar_one()
     txs = list(db.execute(query.order_by(Transaction.created_at.desc()).offset(offset).limit(limit)).scalars())
-    return AdminTransactionListOut(
-        items=[AdminTransactionOut.model_validate(t) for t in txs],
-        total=total,
-        limit=limit,
-        offset=offset,
-    )
+
+    def _user_name(uid: uuid.UUID) -> str:
+        u = db.get(User, uid)
+        if u is None:
+            return str(uid)[:8]
+        return f"{u.last_name} {u.first_name}".strip() or u.email
+
+    items = []
+    for t in txs:
+        out = AdminTransactionOut.model_validate(t)
+        out.payer_name = _user_name(t.payer_id)
+        out.receiver_name = _user_name(t.receiver_id)
+        items.append(out)
+
+    return AdminTransactionListOut(items=items, total=total, limit=limit, offset=offset)
 
 
 # ---------------------------------------------------------------------------
@@ -325,7 +334,21 @@ def list_all_reviews(
     q = select(Review).order_by(Review.created_at.desc())
     total = db.execute(select(func.count()).select_from(q.subquery())).scalar_one()
     rows = db.execute(q.offset(offset).limit(limit)).scalars().all()
-    return {"items": [ReviewOut.model_validate(r) for r in rows], "total": total}
+
+    def _name(uid: uuid.UUID) -> str:
+        u = db.get(User, uid)
+        if u is None:
+            return str(uid)[:8]
+        return f"{u.last_name} {u.first_name}".strip() or u.email
+
+    items = []
+    for r in rows:
+        d = ReviewOut.model_validate(r).model_dump()
+        d["author_name"] = _name(r.author_id)
+        d["recipient_name"] = _name(r.recipient_id)
+        items.append(d)
+
+    return {"items": items, "total": total}
 
 
 @router.delete(

@@ -62,6 +62,8 @@ class AdminTransactionOut(BaseModel):
     id: UUID
     payer_id: UUID
     receiver_id: UUID
+    payer_name: str = ""
+    receiver_name: str = ""
     order_id: UUID | None
     amount: Decimal
     commission_amount: Decimal
