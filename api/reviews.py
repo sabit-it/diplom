@@ -7,6 +7,7 @@ from core.database import get_db
 from core.dependencies import get_current_active_user
 from models.user import User
 from schemas.review import ReviewCreate, ReviewOut
+from repositories.review_repository import list_reviews_for_recipient
 from services.review_service import (
     create_review_for_order,
     list_my_given_reviews,
@@ -61,6 +62,20 @@ def get_my_reviews(
     user: User = Depends(get_current_active_user),
 ) -> list[ReviewOut]:
     return list_my_given_reviews(db, user)
+
+
+@router.get(
+    "/for-user/{user_id}",
+    response_model=list[ReviewOut],
+    summary="Отзывы о пользователе по user_id",
+)
+def get_reviews_for_user(
+    user_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_active_user),
+) -> list[ReviewOut]:
+    rows = list_reviews_for_recipient(db, user_id)
+    return [ReviewOut.model_validate(r) for r in rows]
 
 
 @router.get(
