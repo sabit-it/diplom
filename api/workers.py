@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from core.database import get_db
 from core.dependencies import get_current_active_user
 from models.user import User
-from schemas.worker import WorkerCatalogOut, WorkerLinePatch, WorkerProfileOut, WorkerProfileUpsert
+from schemas.worker import WorkerCatalogItem, WorkerCatalogOut, WorkerLinePatch, WorkerProfileOut, WorkerProfileUpsert
 from services.worker_service import (
     get_my_worker_profile,
     get_public_worker_profile,
