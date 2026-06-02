@@ -67,19 +67,6 @@ def get_workers_catalog(
 
 
 @router.get(
-    "/{user_id}",
-    response_model=WorkerCatalogItem,
-    summary="Профиль исполнителя по user_id",
-)
-def get_worker_by_user_id(
-    user_id: uuid.UUID,
-    db: Session = Depends(get_db),
-    _: User = Depends(get_current_active_user),
-) -> WorkerCatalogItem:
-    return get_public_worker_profile(db, user_id)
-
-
-@router.get(
     "/me/profile",
     response_model=WorkerProfileOut,
     summary="Мой профиль исполнителя",
@@ -125,3 +112,16 @@ def patch_my_line_status(
     user: User = Depends(get_current_active_user),
 ) -> WorkerProfileOut:
     return set_worker_line_status(db, user, payload)
+
+
+@router.get(
+    "/{user_id}",
+    response_model=WorkerCatalogItem,
+    summary="Профиль исполнителя по user_id",
+)
+def get_worker_by_user_id(
+    user_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_active_user),
+) -> WorkerCatalogItem:
+    return get_public_worker_profile(db, user_id)
